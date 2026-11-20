@@ -1,0 +1,17 @@
+node_modules/
+.DS_Store
+*.zip
+dist/
+test/.tmp/
+.cache/
+
+# Local secrets and build artifacts
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+*.crx

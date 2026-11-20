@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>X 翻译</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="icons/icon48.png" alt="" width="32" height="32">
+      <div class="brand-text">
+        <h1>X 翻译</h1>
+        <p>推文自动翻译</p>
+      </div>
+    </div>
+    <label class="switch" title="启用 / 停用">
+      <input id="enabled" type="checkbox">
+      <span class="slider"></span>
+      <span class="sr-only">启用翻译</span>
+    </label>
+  </header>
+
+  <div id="siteHint" class="hint">正在检查当前页面…</div>
+
+  <section class="card">
+    <label class="row">
+      <span class="row-label">自动翻译</span>
+      <span class="switch switch-sm">
+        <input id="autoTranslate" type="checkbox">
+        <span class="slider"></span>
+        <span class="sr-only">自动翻译</span>
+      </span>
+    </label>
+
+    <label class="row">
+      <span class="row-label">翻译成</span>
+      <select id="targetLang" class="select"></select>
+    </label>
+
+    <div class="row row-static">
+      <span class="row-label">翻译服务</span>
+      <span id="providerName" class="row-value">自动（本地优先）</span>
+    </div>
+
+    <div id="providerWarning" class="warning hidden"></div>
+  </section>
+
+  <section class="actions">
+    <button id="translatePage" class="btn btn-primary" type="button">翻译当前页</button>
+    <button id="openOptions" class="btn btn-secondary" type="button">设置</button>
+  </section>
+
+  <div id="status" class="status">正在读取页面状态…</div>
+
+  <footer class="foot">
+    <span>仅作用于 x.com / twitter.com</span>
+    <span id="version"></span>
+  </footer>
+
+  <script src="lib/shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

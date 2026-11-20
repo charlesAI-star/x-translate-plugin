@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>X 翻译设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div class="brand">
+        <img src="icons/icon128.png" alt="" width="48" height="48">
+        <div>
+          <h1>X 翻译</h1>
+          <p>在 X（Twitter）时间线上自动翻译外语推文</p>
+        </div>
+      </div>
+      <button id="saveTop" class="btn btn-primary" type="button">保存设置</button>
+    </header>
+
+    <main>
+      <section class="card">
+        <div class="card-head">
+          <h2>基本设置</h2>
+          <p>控制翻译哪些推文、翻译成什么语言。</p>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">启用翻译</div>
+            <div class="setting-desc">关闭后扩展不会翻译任何推文，也不会显示译文。</div>
+          </div>
+          <label class="switch">
+            <input id="enabled" type="checkbox">
+            <span class="slider"></span>
+            <span class="sr-only">启用翻译</span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">自动翻译可见推文</div>
+            <div class="setting-desc">滚动到外语推文时自动翻译。关闭后，每条推文下方会显示「翻译」按钮。</div>
+          </div>
+          <label class="switch">
+            <input id="autoTranslate" type="checkbox">
+            <span class="slider"></span>
+            <span class="sr-only">自动翻译</span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">目标语言</div>
+            <div class="setting-desc">只翻译与目标语言不同的推文。</div>
+          </div>
+          <select id="targetLang" class="input select"></select>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">跳过已经是目标语言的推文</div>
+            <div class="setting-desc">例如目标为中文时，不再翻译中文推文。</div>
+          </div>
+          <label class="check"><input id="skipTargetLang" type="checkbox"></label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">翻译引用推文</div>
+            <div class="setting-desc">推文里嵌套的引用内容也会翻译。</div>
+          </div>
+          <label class="check"><input id="translateQuotes" type="checkbox"></label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">翻译个人简介</div>
+            <div class="setting-desc">在个人主页上翻译用户简介（默认关闭）。</div>
+          </div>
+          <label class="check"><input id="translateBios" type="checkbox"></label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">显示翻译服务标签</div>
+            <div class="setting-desc">在译文下方显示「本地」「Google」「AI」等来源。</div>
+          </div>
+          <label class="check"><input id="showProviderLabel" type="checkbox"></label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>翻译服务</h2>
+          <p>选择由谁提供翻译。默认的「自动」会优先使用 Chrome 本地翻译。</p>
+        </div>
+
+        <div class="providers">
+          <label class="provider-card">
+            <input type="radio" name="provider" value="auto">
+            <span class="provider-body">
+              <span class="provider-title">自动（本地优先）<span class="badge">推荐</span></span>
+              <span class="provider-desc">优先使用 Chrome 内置翻译；语言对不支持或失败时自动改用 Google。无需配置。</span>
+            </span>
+          </label>
+
+          <label class="provider-card">
+            <input type="radio" name="provider" value="chrome">
+            <span class="provider-body">
+              <span class="provider-title">Chrome 内置翻译</span>
+              <span class="provider-desc">免费、在本机运行。首次翻译某个语言对时会下载模型，文本不离开本机。</span>
+            </span>
+          </label>
+
+          <label class="provider-card">
+            <input type="radio" name="provider" value="google">
+            <span class="provider-body">
+              <span class="provider-title">Google 翻译</span>
+              <span class="provider-desc">使用免费网页接口，无需 Key。可能被限流，速度取决于网络和代理。</span>
+            </span>
+          </label>
+
+          <label class="provider-card">
+            <input type="radio" name="provider" value="llm">
+            <span class="provider-body">
+              <span class="provider-title">大模型（OpenAI 兼容）<span class="badge badge-ai">质量最好</span></span>
+              <span class="provider-desc">DeepSeek、OpenAI、硅基流动、Moonshot、智谱、Ollama、LM Studio、Magpie 等；云端服务需要 API Key。</span>
+            </span>
+          </label>
+
+          <label class="provider-card">
+            <input type="radio" name="provider" value="azure">
+            <span class="provider-body">
+              <span class="provider-title">Microsoft Translator</span>
+              <span class="provider-desc">Azure 翻译服务，每月有免费额度。需要 Key 和资源区域。</span>
+            </span>
+          </label>
+
+          <label class="provider-card">
+            <input type="radio" name="provider" value="mymemory">
+            <span class="provider-body">
+              <span class="provider-title">MyMemory</span>
+              <span class="provider-desc">无需 Key 的备用接口。每天额度较小，长推文会被分段，质量一般。</span>
+            </span>
+          </label>
+        </div>
+
+        <div id="panel-auto" class="provider-panel">
+          <p class="note">「自动」优先使用 Chrome 本地翻译；如果模型还没下载，页面底部会提示点一次「启用本地翻译」（Chrome 要求用户手势才能下载模型）。未启用前会自动改用 Google，翻译不会中断。你可以在译文下方看到实际使用的服务。</p>
+        </div>
+
+        <div id="panel-chrome" class="provider-panel">
+          <p class="note">Chrome 内置翻译按「源语言 → 目标语言」下载模型。第一次遇到日语、法语等语言时，页面底部会提示点一次「启用本地翻译」，下载几秒到几十秒后生效；之后会很快。需要 Chrome 138 或更高版本。也可以点下方「测试当前配置」预先下载英语模型。</p>
+        </div>
+
+        <div id="panel-google" class="provider-panel">
+          <p class="note">这是 Google 翻译的免费网页接口，不需要 API Key，但可能因为请求过多而返回 429。遇到限流时，建议换用 Chrome 本地翻译或大模型。</p>
+        </div>
+
+        <div id="panel-llm" class="provider-panel">
+          <div class="field-grid">
+            <label class="field">
+              <span class="field-label">服务预设</span>
+              <select id="llmPreset" class="input select"></select>
+            </label>
+            <label class="field">
+              <span class="field-label">API 地址（Base URL）</span>
+              <input id="llmBaseUrl" class="input" type="text" spellcheck="false" autocomplete="off" placeholder="https://api.deepseek.com/v1">
+            </label>
+            <label class="field">
+              <span class="field-label">模型名称</span>
+              <span class="input-with-button">
+                <input id="llmModel" class="input" type="text" spellcheck="false" autocomplete="off" list="llmModelOptions" placeholder="deepseek-chat">
+                <button id="loadModels" class="mini-btn" type="button">获取模型</button>
+              </span>
+            </label>
+            <label class="field">
+              <span class="field-label">API Key</span>
+              <span class="input-with-button">
+                <input id="llmApiKey" class="input" type="password" spellcheck="false" autocomplete="off" placeholder="sk-...">
+                <button id="toggleApiKey" class="mini-btn" type="button">显示</button>
+              </span>
+            </label>
+          </div>
+          <datalist id="llmModelOptions"></datalist>
+          <div class="local-tools">
+            <button id="detectLocal" class="mini-btn" type="button">自动检测本地服务</button>
+            <span id="llmToolsStatus" class="scan-status" role="status"></span>
+          </div>
+          <div id="localScanResult" class="scan-result hidden"></div>
+          <p class="note">Key 只保存在本机 <code>chrome.storage.local</code>，不会同步到云端。Ollama / LM Studio / Magpie 这类本地服务通常不需要真实 Key；Magpie 的默认网关是 <code>127.0.0.1:3425</code>，默认 Key 为 <code>magpie</code>。选择预设会自动填入地址和模型，仍可手动修改。点「自动检测本地服务」可以扫描 Magpie、Ollama、LM Studio、LiteLLM、One API 等常见端口，再点「获取模型」从服务的 <code>/v1/models</code> 读取模型或路由组。检测只填入设置，不会自动切换翻译服务；确认后点「保存设置」才会生效。</p>
+          <p class="note">速度提示：翻译延迟主要取决于模型。名字里带 <code>flash</code> / <code>mini</code> / <code>fast</code> 的模型通常明显更快；带 <code>pro</code> / <code>max</code> / <code>thinking</code> 的推理模型会更慢。Magpie 的 <code>auto/...</code> 是路由组，可能比直接的 <code>provider/model</code> 多一层路由。翻译推文建议优先选轻量模型；在 Magpie 上可以先试 <code>auto/glm-5.3-flash</code>，<code>auto/deepseek-v4.1-flash</code> 质量好但通常更慢。</p>
+          <div id="llmPermissionHint" class="warning hidden"></div>
+        </div>
+
+        <div id="panel-azure" class="provider-panel">
+          <div class="field-grid">
+            <label class="field">
+              <span class="field-label">订阅 Key</span>
+              <input id="azureKey" class="input" type="password" spellcheck="false" autocomplete="off" placeholder="Azure Translator Key">
+            </label>
+            <label class="field">
+              <span class="field-label">资源区域</span>
+              <input id="azureRegion" class="input" type="text" spellcheck="false" autocomplete="off" placeholder="eastasia">
+            </label>
+          </div>
+          <p class="note">在 Azure 门户创建「Translator」资源后，从「密钥和终结点」页面获取 Key 与区域。免费层每月约 200 万字符。</p>
+        </div>
+
+        <div id="panel-mymemory" class="provider-panel">
+          <label class="field">
+            <span class="field-label">联系邮箱（可选，用于提高每日额度）</span>
+            <input id="mymemoryEmail" class="input" type="email" spellcheck="false" autocomplete="off" placeholder="you@example.com">
+          </label>
+          <p class="note">不填邮箱也能使用，但额度更低。MyMemory 是翻译记忆库，质量不稳定，建议只作为备用。</p>
+        </div>
+
+        <div class="test-box">
+          <div class="test-head">
+            <h3>测试翻译</h3>
+            <button id="testBtn" class="btn btn-secondary" type="button">测试当前配置</button>
+          </div>
+          <textarea id="testText" class="input textarea" rows="2" spellcheck="false">Hello world! This is a test of the translation service.</textarea>
+          <div id="testResult" class="test-result" role="status"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>高级</h2>
+          <p>一般保持默认即可。</p>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">个人主页提前翻译</div>
+            <div class="setting-desc">打开博主主页时，提前翻译前 12 条推文（仅大模型模式），滚动时更少等待；会略微增加模型调用。</div>
+          </div>
+          <label class="check"><input id="prefetchProfile" type="checkbox"></label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">最短翻译长度</div>
+            <div class="setting-desc">少于这个字符数的推文会被跳过，避免翻译「lol」「+1」这类内容。</div>
+          </div>
+          <input id="minChars" class="input input-number" type="number" min="1" max="50" step="1">
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">调试日志</div>
+            <div class="setting-desc">在 X 页面控制台输出扫描和翻译过程，排查问题时使用。</div>
+          </div>
+          <label class="check"><input id="debug" type="checkbox"></label>
+        </div>
+
+        <div class="button-row">
+          <button id="clearCache" class="btn btn-secondary" type="button">清除翻译缓存</button>
+          <button id="resetSettings" class="btn btn-danger" type="button">恢复默认设置</button>
+        </div>
+      </section>
+
+      <section class="card about">
+        <div class="card-head">
+          <h2>隐私与说明</h2>
+        </div>
+        <p>扩展只在 <code>x.com</code>、<code>twitter.com</code> 上运行，只读取时间线中的推文文本。使用 Google、大模型或 Microsoft Translator 时，推文文本会发送到你选择的服务；使用 Chrome 内置翻译时，文本留在本机。</p>
+        <p>本项目与 X Corp. 无关。译文由第三方模型生成，可能存在错误，请以原文为准。</p>
+        <p class="muted">如果你需要更完整的功能（整页翻译、PDF、字幕、更多站点规则），可以直接使用现成项目：<a href="https://github.com/fishjar/kiss-translator" target="_blank" rel="noreferrer">Kiss Translator（开源）</a> 或 <a href="https://immersivetranslate.com/" target="_blank" rel="noreferrer">沉浸式翻译</a>。</p>
+        <p class="muted">版本 <span id="version"></span> · 参考了 Kiss Translator 的 X 页面选择器思路。</p>
+      </section>
+    </main>
+
+    <footer class="savebar">
+      <span id="saveStatus" class="save-status">设置保存在本机，不会上传。</span>
+      <button id="saveBottom" class="btn btn-primary" type="button">保存设置</button>
+    </footer>
+  </div>
+
+  <script src="lib/shared.js"></script>
+  <script src="lib/core.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
