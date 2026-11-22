@@ -18,7 +18,15 @@
 
   const SETTINGS_KEY = 'settings';
   const TWEET_TEXT = '[data-testid="tweetText"]';
-  const ARTICLE_TITLE = '[data-testid="twitter-article-title"]';
+  const ARTICLE_TITLE = '[data-testid="twitter-article-title"], [data-testid="twitterArticleTitle"], [data-article-part="title"]';
+  const ARTICLE_BODY_ROOTS = ['.x-article-body', '[data-testid="twitterArticleRichTextView"]'];
+  // X serves two article DOMs. The newer one uses real p/h2/li elements; the
+  // older Draft.js reader keeps each paragraph in a div.longform-unstyled and
+  // its headings in h1-h3.longform-header-*. Both are handled here.
+  const ARTICLE_BODY_TAGS = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, figcaption, div.longform-unstyled';
+  const ARTICLE_BODY_BLOCK = ARTICLE_BODY_ROOTS
+    .map((root) => root + ' :is(' + ARTICLE_BODY_TAGS + ')')
+    .join(', ');
   const USER_DESCRIPTION = '[data-testid="UserDescription"]';
   const TWEET_ARTICLE = 'article[data-testid="tweet"]';
   const MAX_BATCH = 16;
@@ -294,14 +302,19 @@
   }
 
   function collectTargets() {
-    const selectors = [TWEET_TEXT, ARTICLE_TITLE];
+    const selectors = [TWEET_TEXT, ARTICLE_TITLE, ARTICLE_BODY_BLOCK];
     if (settings.translateBios) selectors.push(USER_DESCRIPTION);
     const nodes = Array.from(document.querySelectorAll(selectors.join(',')));
     return nodes.filter((node) => {
       if (node.closest('.xtr-block, .xtr-chip')) return false;
       if (node.matches(USER_DESCRIPTION)) return settings.translateBios;
       const inTweet = !!node.closest(TWEET_ARTICLE);
-      if (!inTweet && !node.matches(ARTICLE_TITLE)) return false;
+      const isArticleTitle = node.matches(ARTICLE_TITLE);
+      const isArticleBody = node.matches(ARTICLE_BODY_BLOCK);
+      if (!inTweet && !isArticleTitle && !isArticleBody) return false;
+      // Prefer the innermost block: a list item containing a paragraph should
+      // be translated through the paragraph, not twice.
+      if (isArticleBody && node.querySelector(ARTICLE_BODY_BLOCK)) return false;
       if (!settings.translateQuotes && inTweet && isQuoteText(node)) return false;
       return true;
     });
@@ -422,6 +435,12 @@
   function insertAfter(node, el) {
     const parent = node.parentElement;
     if (!parent) return false;
+    // A <div> directly under <ul>/<ol> is invalid HTML. For list items with
+    // direct text, keep the translation inside the item instead.
+    if (parent.tagName === 'UL' || parent.tagName === 'OL') {
+      node.appendChild(el);
+      return true;
+    }
     parent.insertBefore(el, node.nextSibling);
     try {
       const style = getComputedStyle(parent);
@@ -1173,10 +1192,10 @@
   function isRelevantMutation(mutation) {
     if (mutation.type === 'characterData') {
       const parent = mutation.target.parentElement;
-      return !!(parent && parent.closest(TWEET_TEXT + ',' + ARTICLE_TITLE + ',' + USER_DESCRIPTION));
+      return !!(parent && parent.closest(TWEET_TEXT + ',' + ARTICLE_TITLE + ',' + ARTICLE_BODY_BLOCK + ',' + USER_DESCRIPTION));
     }
     if (mutation.type === 'childList') {
-      const selector = TWEET_TEXT + ',' + ARTICLE_TITLE + ',' + USER_DESCRIPTION;
+      const selector = TWEET_TEXT + ',' + ARTICLE_TITLE + ',' + ARTICLE_BODY_BLOCK + ',' + USER_DESCRIPTION;
       for (const node of mutation.addedNodes) {
         if (node.nodeType !== 1) continue;
         if (node.matches && node.matches(selector)) return true;

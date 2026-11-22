@@ -1,6 +1,6 @@
 {
   "name": "x-translate-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Chrome extension that automatically translates foreign-language posts on X/Twitter.",
   "license": "MIT",
