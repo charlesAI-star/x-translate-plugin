@@ -80,6 +80,7 @@ function draftArticleHtml() {
     + block('draft-p1', 'In order to make AI work for your company, you need better knowledge.')
     + block('draft-h2', 'Context vs knowledge', 'h2')
     + block('draft-p2', 'Context is what an agent has available when doing a task.')
+    + '<ul><li id="draft-li" class="longform-unordered-list-item">Early AI frameworks.</li></ul>'
     + '</div></div></div></div></div></div>'
     + '</article></article></body></html>';
 }
@@ -505,7 +506,7 @@ async function main() {
       timeout: 30000
     });
     await draftPage.waitForFunction(
-      () => document.querySelectorAll('.xtr-block[data-xtr-state="done"]').length >= 4,
+      () => document.querySelectorAll('.xtr-block[data-xtr-state="done"]').length >= 5,
       { timeout: 15000 }
     );
     assert.equal(
@@ -522,6 +523,10 @@ async function main() {
     assert.equal(
       await blockText(draftPage, '.longform-header-two + .xtr-block .xtr-text'),
       '译：Context vs knowledge'
+    );
+    assert.equal(
+      await blockText(draftPage, '#draft-li .xtr-block .xtr-text'),
+      '译：Early AI frameworks.'
     );
     console.log('✓ 旧版 Draft.js 文章正文翻译');
     await draftPage.close();
