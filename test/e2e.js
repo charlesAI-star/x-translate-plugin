@@ -45,6 +45,45 @@ function profileHtml(count = 12) {
     + '<body style="margin:0"><div id="timeline">' + items.join('') + '</div></body></html>';
 }
 
+function articleHtml() {
+  return '<!doctype html><html><head><meta charset="utf-8"><title>article</title></head><body>'
+    + '<article>'
+    + '<h1 id="article-title" data-article-part="title">How to build a knowledge factory</h1>'
+    + '<div data-article-part="body"><div class="x-article-body"><div class="contents">'
+    + '<p id="article-p1">In order to make AI work for your company, you need better knowledge.</p>'
+    + '<h3 id="article-h3">Context vs knowledge</h3>'
+    + '<p id="article-p2">Context is what an agent has available when doing a task.</p>'
+    + '<ul><li id="article-li">How to do the work - Skills.</li></ul>'
+    + '</div></div></div>'
+    + '</article></body></html>';
+}
+
+// Older X article reader: title is twitter-article-title, and the body is a
+// read-only Draft.js editor. Paragraphs are div.longform-unstyled; headings are
+// h2.longform-header-two wrapping a Draft block.
+function draftArticleHtml() {
+  const block = (id, text, tag) => {
+    const inner = '<div class="public-DraftStyleDefault-block public-DraftStyleDefault-ltr">'
+      + '<span><span data-text="true"' + (id ? ' id="' + id + '"' : '') + '>' + text + '</span></span>'
+      + '</div>';
+    return tag === 'h2'
+      ? '<div class="css-146c3p1"><h2 class="longform-header-two">' + inner + '</h2></div>'
+      : '<div class="longform-unstyled">' + inner + '</div>';
+  };
+  return '<!doctype html><html><head><meta charset="utf-8"><title>draft article</title></head><body>'
+    + '<article data-testid="tweet">'
+    + '<article data-testid="twitterArticleReadView">'
+    + '<div data-testid="twitter-article-title"><span id="draft-title">How to build a knowledge factory</span></div>'
+    + '<div data-testid="twitterArticleRichTextView"><div><div class="DraftEditor-root">'
+    + '<div class="DraftEditor-editorContainer">'
+    + '<div data-testid="longformRichTextComponent" class="public-DraftEditor-content"><div>'
+    + block('draft-p1', 'In order to make AI work for your company, you need better knowledge.')
+    + block('draft-h2', 'Context vs knowledge', 'h2')
+    + block('draft-p2', 'Context is what an agent has available when doing a task.')
+    + '</div></div></div></div></div></div>'
+    + '</article></article></body></html>';
+}
+
 let puppeteer;
 try {
   puppeteer = require('puppeteer-core');
@@ -115,6 +154,16 @@ function startServer() {
     if (req.method === 'GET' && url.pathname === '/alice') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(profileHtml());
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/alice/status/123') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(articleHtml());
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/alice/status/456') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(draftArticleHtml());
       return;
     }
     if (req.method === 'GET' && url.pathname === '/v1/models') {
@@ -414,6 +463,68 @@ async function main() {
     assert.equal(await profilePage.$$eval('.xtr-block', (els) => els.length), 12);
     console.log('✓ 个人主页提前翻译屏外推文');
     await profilePage.close();
+
+    // X's new article view has no data-testid attributes. The title, body
+    // paragraphs, headings and list items live under data-article-part and
+    // .x-article-body.
+    const articlePage = await browser.newPage();
+    await articlePage.setViewport({ width: 1280, height: 1000 });
+    await articlePage.goto('http://' + TEST_HOST + ':' + port + '/alice/status/123', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    });
+    await articlePage.waitForFunction(
+      () => document.querySelectorAll('.xtr-block[data-xtr-state="done"]').length >= 5,
+      { timeout: 15000 }
+    );
+    assert.equal(
+      await blockText(articlePage, '#article-title + .xtr-block .xtr-text'),
+      '译：How to build a knowledge factory'
+    );
+    assert.equal(
+      await blockText(articlePage, '#article-p1 + .xtr-block .xtr-text'),
+      '译：In order to make AI work for your company, you need better knowledge.'
+    );
+    assert.equal(
+      await blockText(articlePage, '#article-h3 + .xtr-block .xtr-text'),
+      '译：Context vs knowledge'
+    );
+    assert.equal(
+      await blockText(articlePage, '#article-li .xtr-block .xtr-text'),
+      '译：How to do the work - Skills.'
+    );
+    console.log('✓ X 文章标题、正文段落和列表项翻译');
+    await articlePage.close();
+
+    // Older X article reader (Draft.js): paragraphs are div.longform-unstyled
+    // instead of <p>, and the body has no .x-article-body wrapper.
+    const draftPage = await browser.newPage();
+    await draftPage.setViewport({ width: 1280, height: 1000 });
+    await draftPage.goto('http://' + TEST_HOST + ':' + port + '/alice/status/456', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    });
+    await draftPage.waitForFunction(
+      () => document.querySelectorAll('.xtr-block[data-xtr-state="done"]').length >= 4,
+      { timeout: 15000 }
+    );
+    assert.equal(
+      await blockText(draftPage, '[data-testid="twitter-article-title"] + .xtr-block .xtr-text'),
+      '译：How to build a knowledge factory'
+    );
+    assert.equal(
+      await draftPage.evaluate(() => {
+        const block = document.getElementById('draft-p1').closest('.longform-unstyled');
+        return block && block.nextElementSibling && block.nextElementSibling.querySelector('.xtr-text').textContent.trim();
+      }),
+      '译：In order to make AI work for your company, you need better knowledge.'
+    );
+    assert.equal(
+      await blockText(draftPage, '.longform-header-two + .xtr-block .xtr-text'),
+      '译：Context vs knowledge'
+    );
+    console.log('✓ 旧版 Draft.js 文章正文翻译');
+    await draftPage.close();
 
     assert.ok(requests.length > 0, '应该至少请求过一次大模型接口');
     console.log('✓ 请求经由后台 Service Worker 发往所配置的接口');
