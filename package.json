@@ -2,7 +2,7 @@
   "name": "x-translate-plugin",
   "version": "0.2.2",
   "private": true,
-  "description": "Chrome extension that automatically translates foreign-language posts on X/Twitter.",
+  "description": "Chrome extension that translates X/Twitter posts and copies post/article text with full links.",
   "license": "MIT",
   "engines": {
     "node": ">=20"
