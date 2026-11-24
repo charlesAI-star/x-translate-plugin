@@ -127,11 +127,82 @@
   outline-offset: 2px;
 }
 
+.xtr-copy-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  margin: 0 0 0 4px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(113, 118, 123);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+}
+
+article:hover .xtr-copy-btn,
+.xtr-copy-btn:focus-visible {
+  opacity: 1;
+}
+
+.xtr-copy-btn:hover {
+  color: rgb(29, 155, 240);
+  background: rgba(29, 155, 240, 0.1);
+}
+
+.xtr-copy-btn:focus-visible {
+  outline: 1px solid rgb(29, 155, 240);
+  outline-offset: 1px;
+}
+
+.xtr-article-copy {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin: 10px 0 0;
+  padding: 5px 12px;
+  border: 1px solid rgba(29, 155, 240, 0.45);
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(29, 155, 240);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.xtr-article-copy:hover,
+.xtr-article-copy:focus-visible {
+  background: rgba(29, 155, 240, 0.12);
+}
+
+.xtr-article-copy:focus-visible {
+  outline: 1px solid rgb(29, 155, 240);
+  outline-offset: 2px;
+}
+
 html.xtr-hide-provider .xtr-block .xtr-provider,
 html.xtr-hide-provider .xtr-block .xtr-sep {
   display: none !important;
 }
 
+html.xtr-disabled .xtr-copy-btn,
+html.xtr-disabled .xtr-article-copy,
 html.xtr-disabled .xtr-block,
 html.xtr-disabled .xtr-chip {
   display: none !important;
