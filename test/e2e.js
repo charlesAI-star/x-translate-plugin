@@ -85,6 +85,37 @@ function draftArticleHtml() {
     + '</article></article></body></html>';
 }
 
+function copyTweetHtml() {
+  return '<!doctype html><html><head><meta charset="utf-8"><title>copy tweet</title></head><body>'
+    + '<article data-testid="tweet" id="copy-tweet">'
+    + '<div data-testid="tweetText" lang="zh">第一行<img alt="😀"><br>第二行<br>看这个：'
+    + '<a href="https://t.co/abc123" title="https://example.com/full/path?x=1">example.com/full/pa…</a>'
+    + '<div data-testid="tweet-text-show-more-link">显示更多</div>'
+    + '</div>'
+    + '<div role="group" id="copy-actions"><button type="button" data-testid="reply">回复</button>'
+    + '<button type="button" data-testid="like">喜欢</button></div>'
+    + '<div role="link"><article data-testid="tweet" id="quoted-tweet">'
+    + '<div data-testid="tweetText" lang="en">Quoted text should not be copied.</div>'
+    + '<div role="group"><button type="button" data-testid="like">like</button></div>'
+    + '</article></div>'
+    + '</article></body></html>';
+}
+
+function copyArticleHtml() {
+  return '<!doctype html><html><head><meta charset="utf-8"><title>copy article</title></head><body>'
+    + '<article data-testid="tweet"><article data-testid="twitterArticleReadView">'
+    + '<div data-testid="twitter-article-title"><span id="copy-article-title">如何构建知识工厂</span></div>'
+    + '<div data-testid="twitterArticleRichTextView"><div>'
+    + '<div class="longform-unstyled"><div class="public-DraftStyleDefault-block"><span>第一段。</span></div></div>'
+    + '<div class="css-copy"><h2 class="longform-header-two"><div class="public-DraftStyleDefault-block"><span>小标题</span></div></h2></div>'
+    + '<div class="longform-unstyled"><div class="public-DraftStyleDefault-block"><span>第二段，见 '
+    + '<a href="https://t.co/xyz789" title="https://example.com/a/b?c=1">example.com/a/b…</a>。</span></div></div>'
+    + '<ul><li class="longform-unordered-list-item">列表项一</li>'
+    + '<li class="longform-unordered-list-item">列表项二</li></ul>'
+    + '<figure><figcaption>图片说明</figcaption></figure>'
+    + '</div></div></article></article></body></html>';
+}
+
 let puppeteer;
 try {
   puppeteer = require('puppeteer-core');
@@ -132,7 +163,7 @@ function copyExtension(tmpRoot) {
   const manifestPath = path.join(extDir, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   for (const script of manifest.content_scripts || []) {
-    script.matches = ['http://' + TEST_HOST + '/*'];
+    script.matches = ['http://' + TEST_HOST + '/*', 'http://127.0.0.1/*'];
   }
   manifest.host_permissions = Array.from(new Set([
     ...(manifest.host_permissions || []),
@@ -165,6 +196,16 @@ function startServer() {
     if (req.method === 'GET' && url.pathname === '/alice/status/456') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(draftArticleHtml());
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/copy-tweet') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(copyTweetHtml());
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/copy-article') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(copyArticleHtml());
       return;
     }
     if (req.method === 'GET' && url.pathname === '/v1/models') {
@@ -479,7 +520,7 @@ async function main() {
       { timeout: 15000 }
     );
     assert.equal(
-      await blockText(articlePage, '#article-title + .xtr-block .xtr-text'),
+      await blockText(articlePage, '#article-title ~ .xtr-block .xtr-text'),
       '译：How to build a knowledge factory'
     );
     assert.equal(
@@ -510,7 +551,7 @@ async function main() {
       { timeout: 15000 }
     );
     assert.equal(
-      await blockText(draftPage, '[data-testid="twitter-article-title"] + .xtr-block .xtr-text'),
+      await blockText(draftPage, '[data-testid="twitter-article-title"] ~ .xtr-block .xtr-text'),
       '译：How to build a knowledge factory'
     );
     assert.equal(
@@ -530,6 +571,58 @@ async function main() {
     );
     console.log('✓ 旧版 Draft.js 文章正文翻译');
     await draftPage.close();
+
+    // One-click copy: Chinese posts are skipped by the translator, but the
+    // copy button must still appear. Copying expands truncated links, keeps
+    // line breaks and emoji, skips "show more" and quoted tweets.
+    const copyOrigin = 'http://127.0.0.1:' + port;
+    await browser.defaultBrowserContext().overridePermissions(
+      copyOrigin,
+      ['clipboard-read', 'clipboard-write']
+    );
+
+    const copyPage = await browser.newPage();
+    await copyPage.setViewport({ width: 1280, height: 900 });
+    await copyPage.goto(copyOrigin + '/copy-tweet', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await copyPage.waitForSelector('#copy-actions .xtr-copy-btn', { timeout: 10000 });
+    await copyPage.bringToFront();
+    await copyPage.hover('#copy-tweet');
+    await copyPage.click('#copy-actions .xtr-copy-btn');
+    await copyPage.waitForFunction(
+      () => {
+        const toast = document.querySelector('.xtr-toast');
+        return !!toast && toast.textContent.includes('已复制');
+      },
+      { timeout: 5000 }
+    );
+    assert.equal(
+      await copyPage.evaluate(() => navigator.clipboard.readText()),
+      '第一行😀\n第二行\n看这个：https://example.com/full/path?x=1'
+    );
+    console.log('✓ 推文一键复制保留换行、emoji 和完整链接');
+    await copyPage.close();
+
+    const copyArticlePage = await browser.newPage();
+    await copyArticlePage.goto(copyOrigin + '/copy-article', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await copyArticlePage.waitForSelector(
+      '[data-testid="twitter-article-title"] ~ .xtr-article-copy',
+      { timeout: 10000 }
+    );
+    await copyArticlePage.bringToFront();
+    await copyArticlePage.click('[data-testid="twitter-article-title"] ~ .xtr-article-copy');
+    await copyArticlePage.waitForFunction(
+      () => {
+        const toast = document.querySelector('.xtr-toast');
+        return !!toast && toast.textContent.includes('已复制');
+      },
+      { timeout: 5000 }
+    );
+    assert.equal(
+      await copyArticlePage.evaluate(() => navigator.clipboard.readText()),
+      '如何构建知识工厂\n\n第一段。\n\n小标题\n\n第二段，见 https://example.com/a/b?c=1。\n\n- 列表项一\n- 列表项二\n\n图片说明：图片说明'
+    );
+    console.log('✓ 文章一键复制标题、正文、列表和完整链接');
+    await copyArticlePage.close();
 
     assert.ok(requests.length > 0, '应该至少请求过一次大模型接口');
     console.log('✓ 请求经由后台 Service Worker 发往所配置的接口');

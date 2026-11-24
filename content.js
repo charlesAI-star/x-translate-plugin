@@ -27,6 +27,10 @@
   const ARTICLE_BODY_BLOCK = ARTICLE_BODY_ROOTS
     .map((root) => root + ' :is(' + ARTICLE_BODY_TAGS + ')')
     .join(', ');
+  // Copying uses the same article blocks plus <pre>, so code samples survive.
+  const ARTICLE_COPY_BLOCK = ARTICLE_BODY_ROOTS
+    .map((root) => root + ' :is(' + ARTICLE_BODY_TAGS + ', pre)')
+    .join(', ');
   const USER_DESCRIPTION = '[data-testid="UserDescription"]';
   const TWEET_ARTICLE = 'article[data-testid="tweet"]';
   const MAX_BATCH = 16;
@@ -44,6 +48,9 @@
   let states = new WeakMap();
   let blockStates = new WeakMap();
   let chipStates = new WeakMap();
+  let copyActions = new WeakMap();
+  let tweetCopyButtons = new WeakMap();
+  let articleCopyButtons = new WeakMap();
   let intersection = null;
   let mutationObserver = null;
   let scanTimer = null;
@@ -299,6 +306,267 @@
 
   function isQuoteText(node) {
     return !!node.closest('[role="link"]');
+  }
+
+  /* --------------------------------------------------------------- copy */
+
+  const COPY_BLOCK_TAGS = new Set([
+    'DIV', 'P', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+    'BLOCKQUOTE', 'FIGURE', 'FIGCAPTION', 'PRE'
+  ]);
+
+  function copyUrlFor(anchor) {
+    const candidates = [
+      anchor.getAttribute('title'),
+      anchor.getAttribute('data-expanded-url'),
+      anchor.getAttribute('data-full-url')
+    ];
+    for (const candidate of candidates) {
+      const value = String(candidate || '').trim();
+      if (/^https?:\/\//i.test(value)) return value;
+    }
+    const href = String(anchor.getAttribute('href') || '').trim();
+    if (/^https?:\/\//i.test(href)) return href;
+    if (href.startsWith('/') && !href.startsWith('//') && looksLikeUrlText(anchor.textContent || '')) {
+      return location.origin + href;
+    }
+    return '';
+  }
+
+  function looksLikeUrlText(text) {
+    const value = String(text || '').trim();
+    return /^(?:https?:\/\/|www\.)/i.test(value)
+      || (!/\s/.test(value) && /^[^/]+\.[^/]+/.test(value));
+  }
+
+  /** Walk a tweet/article text node and keep line breaks plus full link URLs. */
+  function textForCopy(root) {
+    let out = '';
+    const appendNewline = () => {
+      if (out && !out.endsWith('\n')) out += '\n';
+    };
+    const walk = (node) => {
+      if (node.nodeType === 3) {
+        out += node.nodeValue || '';
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      const el = node;
+      if (el.matches && el.matches('[data-testid="tweet-text-show-more-link"]')) return;
+      if (el.closest && el.closest('.xtr-block, .xtr-chip, [data-xtr-copy]')) return;
+      const tag = el.tagName;
+      if (tag === 'IMG') {
+        // X renders emoji as <img alt="…">; article photos are replaced by
+        // their figcaption instead of alt text.
+        if (!el.closest('figure')) out += el.getAttribute('alt') || '';
+        return;
+      }
+      if (tag === 'A') {
+        const text = el.textContent || '';
+        const full = copyUrlFor(el);
+        if (full && (el.hasAttribute('title')
+          || el.hasAttribute('data-expanded-url')
+          || el.hasAttribute('data-full-url')
+          || looksLikeUrlText(text))) {
+          out += full;
+        } else {
+          out += text;
+        }
+        return;
+      }
+      if (tag === 'BR') {
+        out += '\n';
+        return;
+      }
+      const block = COPY_BLOCK_TAGS.has(tag);
+      if (block) appendNewline();
+      for (const child of el.childNodes) walk(child);
+      if (block) appendNewline();
+    };
+    walk(root);
+    let text = out
+      .replace(/\r\n?/g, '\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    text = text.replace(/\n?\s*(Show more|显示更多|もっと見る|Mehr anzeigen)$/i, '').trim();
+    return core.cleanText(text);
+  }
+
+  function mainTweetTextNode(article) {
+    const nodes = Array.from(article.querySelectorAll(TWEET_TEXT));
+    return nodes.find((node) => node.closest(TWEET_ARTICLE) === article) || null;
+  }
+
+  async function copyTextToClipboard(text) {
+    if (!text) return false;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) {
+      // Fall back to the selection-based copy below.
+    }
+    let area = null;
+    try {
+      area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.top = '-1000px';
+      area.style.left = '-1000px';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      area.setSelectionRange(0, area.value.length);
+      return document.execCommand('copy');
+    } catch (_) {
+      return false;
+    } finally {
+      if (area) area.remove();
+    }
+  }
+
+  function listDepth(li) {
+    let depth = 0;
+    let node = li;
+    while (node) {
+      if (node.tagName === 'LI') depth++;
+      node = node.parentElement;
+    }
+    return depth;
+  }
+
+  function articleRoot() {
+    const body = document.querySelector(ARTICLE_BODY_ROOTS.join(','));
+    if (!body) return null;
+    return body.closest('article') || document;
+  }
+
+  function articleCopyText() {
+    const root = articleRoot();
+    if (!root) return '';
+    const titleEl = root.querySelector(ARTICLE_TITLE);
+    const title = titleEl ? textForCopy(titleEl) : '';
+    const nodes = Array.from(root.querySelectorAll(ARTICLE_COPY_BLOCK))
+      .filter((node) => !node.closest('.xtr-block, .xtr-chip'))
+      .filter((node) => !node.querySelector(ARTICLE_COPY_BLOCK));
+
+    const parts = [];
+    let lastLi = null;
+    for (const node of nodes) {
+      const text = textForCopy(node);
+      if (!text) continue;
+      const li = node.closest('li');
+      let prefix = '';
+      let kind = 'block';
+      if (li) {
+        kind = 'li';
+        const depth = listDepth(li);
+        if (li === lastLi) {
+          prefix = '  '.repeat(depth);
+        } else {
+          const parent = li.parentElement;
+          let bullet = '';
+          if (parent && parent.tagName === 'OL') {
+            bullet = (Array.prototype.indexOf.call(parent.children, li) + 1) + '. ';
+          } else if (parent && parent.tagName === 'UL') {
+            bullet = '- ';
+          }
+          prefix = '  '.repeat(Math.max(0, depth - 1)) + bullet;
+          lastLi = li;
+        }
+      } else if (node.closest('blockquote')) {
+        prefix = '> ';
+      } else if (node.tagName === 'FIGCAPTION') {
+        prefix = '图片说明：';
+        kind = 'caption';
+      }
+      parts.push({ text: prefix + text, kind });
+    }
+
+    let out = title;
+    let prevKind = '';
+    for (const part of parts) {
+      if (out) out += part.kind === 'li' && prevKind === 'li' ? '\n' : '\n\n';
+      out += part.text;
+      prevKind = part.kind;
+    }
+    return core.cleanText(out);
+  }
+
+  async function copyTweetArticle(article) {
+    const node = mainTweetTextNode(article);
+    const text = node ? textForCopy(node) : '';
+    const ok = await copyTextToClipboard(text);
+    showToast(ok ? '已复制到剪贴板' : (text ? '复制失败，请重试' : '这条推文没有可复制的文字'), { timeout: 2600 });
+  }
+
+  async function copyArticle() {
+    const text = articleCopyText();
+    const ok = await copyTextToClipboard(text);
+    showToast(ok ? '已复制到剪贴板' : (text ? '复制失败，请重试' : '没有找到可复制的文章内容'), { timeout: 2600 });
+  }
+
+  function createCopyButton(kind, action) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = kind === 'article' ? 'xtr-article-copy' : 'xtr-copy-btn';
+    button.setAttribute('data-xtr-copy', kind);
+    button.setAttribute('aria-label', kind === 'article' ? '复制文章全文' : '复制推文文字');
+    button.title = kind === 'article' ? '复制文章全文' : '复制推文文字';
+    button.textContent = kind === 'article' ? '复制全文' : '复制';
+    copyActions.set(button, action);
+    return button;
+  }
+
+  function insertCopyButtonAfter(node, button) {
+    const parent = node.parentElement;
+    if (!parent) return false;
+    parent.insertBefore(button, node.nextSibling);
+    return true;
+  }
+
+  function ensureCopyButtons() {
+    if (!settings.enabled) return;
+
+    const root = articleRoot();
+    if (root) {
+      const articleTitle = root.querySelector(ARTICLE_TITLE);
+      const articleBody = root.querySelector(ARTICLE_BODY_ROOTS.join(','));
+      if (articleTitle && articleBody) {
+        let articleButton = articleCopyButtons.get(articleTitle);
+        if (!articleButton || !articleButton.isConnected) {
+          articleButton = createCopyButton('article', copyArticle);
+          articleCopyButtons.set(articleTitle, articleButton);
+          if (!insertCopyButtonAfter(articleTitle, articleButton)) {
+            articleCopyButtons.delete(articleTitle);
+          }
+        }
+      }
+    }
+
+    for (const article of document.querySelectorAll(TWEET_ARTICLE)) {
+      if (article.querySelector(ARTICLE_BODY_ROOTS.join(','))) continue;
+      const textNode = mainTweetTextNode(article);
+      if (!textNode) continue;
+      const groups = Array.from(article.querySelectorAll('[role="group"]'))
+        .filter((group) => group.closest(TWEET_ARTICLE) === article);
+      const group = groups.length ? groups[groups.length - 1] : null;
+      let button = tweetCopyButtons.get(article);
+      if (button && button.isConnected) {
+        if (group && button.parentElement !== group) group.appendChild(button);
+        continue;
+      }
+      button = createCopyButton('tweet', () => copyTweetArticle(article));
+      tweetCopyButtons.set(article, button);
+      if (group) {
+        group.appendChild(button);
+      } else if (!insertCopyButtonAfter(textNode, button)) {
+        tweetCopyButtons.delete(article);
+      }
+    }
   }
 
   function collectTargets() {
@@ -1095,6 +1363,16 @@
   }
 
   function onClickCapture(event) {
+    const copyEl = event.target.closest && event.target.closest('[data-xtr-copy]');
+    if (copyEl) {
+      event.preventDefault();
+      event.stopPropagation();
+      const action = copyActions.get(copyEl);
+      if (action) {
+        try { action(); } catch (_) { /* ignore */ }
+      }
+      return;
+    }
     const actionEl = event.target.closest && event.target.closest('[data-xtr-action]');
     if (actionEl) {
       const block = actionEl.closest('.xtr-block');
@@ -1127,6 +1405,7 @@
       return;
     }
     pruneStates();
+    ensureCopyButtons();
 
     // On a blogger's profile, translate the first screen's worth of posts up
     // front. The model is the slow part; doing this while the user is still
