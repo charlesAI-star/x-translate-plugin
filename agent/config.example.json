@@ -60,6 +60,7 @@
     "dayOfWeek": 1,
     "hour": 2,
     "minute": 0,
+    "catchUpHours": 4,
     "analyzeBatchSize": 20,
     "analyzeTextChars": 3000,
     "maxL2Actions": 8,

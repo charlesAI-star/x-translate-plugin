@@ -27,6 +27,21 @@ let base = '';
 const llmCalls = [];
 let categoryChangeTarget = 'product';
 let invalidL2Entry = null;
+let delayedEntry = null;
+let releaseDelayed = null;
+
+function singleResult() {
+  return {
+    title: '完整分析标题',
+    summary: '这是一条完整分析摘要。',
+    category_l1: 'ai',
+    category_l2: '',
+    tags: ['AI', '知识库'],
+    key_points: ['要点一', '要点二'],
+    content_type: 'insight',
+    language: 'zh'
+  };
+}
 
 function extractEntries(prompt) {
   const match = String(prompt).match(/<entries>\n([\s\S]*?)\n<\/entries>/);
@@ -41,16 +56,12 @@ function extractEntries(prompt) {
 setMockHandler(({ task, prompt }) => {
   llmCalls.push(task);
   if (task === 'single') {
-    return {
-      title: '完整分析标题',
-      summary: '这是一条完整分析摘要。',
-      category_l1: 'ai',
-      category_l2: '',
-      tags: ['AI', '知识库'],
-      key_points: ['要点一', '要点二'],
-      content_type: 'insight',
-      language: 'zh'
-    };
+    if (delayedEntry && String(prompt).includes(delayedEntry)) {
+      return new Promise((resolve) => {
+        releaseDelayed = () => resolve(singleResult());
+      });
+    }
+    return singleResult();
   }
   if (task === 'classify') {
     return {
@@ -539,7 +550,8 @@ test('re-sending a pending entry upgrades its mode before the worker starts', as
 
 test('deleting and restoring a processing entry resets it to pending', () => {
   const id = 'x:tweet:full-1';
-  store.setEntryProcessing(id);
+  store.retryEntry(id);
+  assert.equal(store.setEntryProcessing(id), true);
   assert.equal(store.getEntry(id).status, 'processing');
   store.softDeleteEntry(id);
   let current = store.getEntry(id);
@@ -588,4 +600,91 @@ test('governance moves report manual overrides', () => {
   const result = store.archiveCategory(category.key, { actor: 'agent', batchId: 'test-govern' });
   assert.equal(result.moved, 1);
   assert.ok(result.manual_overrides.some((item) => item.entry_id === 'x:tweet:pending-upgrade-1'));
+});
+
+test('deleting a running entry aborts its analysis and restore re-enqueues it', async () => {
+  const { getQueueStats } = await import('../lib/worker.js');
+  const id = 'x:tweet:cancel-1';
+  delayedEntry = id;
+  releaseDelayed = null;
+  try {
+    const ingested = await api('/ingest', {
+      method: 'POST',
+      body: capture(id, '这条内容会在分析中被删除。', 'full')
+    });
+    assert.equal(ingested.status, 202);
+    await waitStatus(id, ['processing']);
+    await waitFor(() => (releaseDelayed ? true : null));
+
+    const deleted = await api(`/api/entries/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: { deleted: true }
+    });
+    assert.equal(deleted.status, 200);
+    assert.ok(deleted.data.entry.deleted_at);
+    assert.equal(deleted.data.entry.status, 'pending');
+
+    releaseDelayed();
+    releaseDelayed = null;
+    delayedEntry = null;
+    await waitFor(() => (getQueueStats().running ? null : true));
+
+    const after = await entry(id);
+    assert.equal(after.status, 'pending');
+    assert.equal(after.summary || '', '');
+
+    const restored = await api(`/api/entries/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: { restore: true }
+    });
+    assert.equal(restored.status, 200);
+    const ready = await waitStatus(id, ['ready']);
+    assert.equal(ready.summary, '这是一条完整分析摘要。');
+  } finally {
+    delayedEntry = null;
+    releaseDelayed = null;
+  }
+});
+
+test('aborting llmJson terminates a running Claude CLI child', async () => {
+  const { loadConfig } = await import('../lib/config.js');
+  const { llmJson } = await import('../lib/llm.js');
+  const fake = path.join(TMP, 'fake-claude.sh');
+  fs.writeFileSync(fake, '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 });
+
+  const config = loadConfig();
+  const original = {
+    provider: config.llm.provider,
+    command: config.llm.command,
+    timeoutMs: config.llm.timeoutMs
+  };
+  config.llm.provider = 'claude-cli';
+  config.llm.command = fake;
+  config.llm.timeoutMs = 5000;
+  try {
+    const controller = new AbortController();
+    const started = Date.now();
+    const pending = llmJson({
+      task: 'single',
+      prompt: 'test',
+      schema: { type: 'object' },
+      signal: controller.signal
+    });
+    setTimeout(() => controller.abort(), 100);
+    await assert.rejects(pending, (err) => err.code === 'cancelled');
+    assert.ok(Date.now() - started < 3000);
+  } finally {
+    Object.assign(config.llm, original);
+    fs.rmSync(fake, { force: true });
+  }
+});
+
+test('weekly catch-up stays in the scheduled or night window', async () => {
+  const { isWithinWeeklyRunWindow } = await import('../lib/weekly.js');
+  const scheduled = new Date(2026, 10, 23, 2, 0, 0);
+  assert.equal(isWithinWeeklyRunWindow(new Date(2026, 10, 23, 2, 0, 20), scheduled, 2, 4), true);
+  assert.equal(isWithinWeeklyRunWindow(new Date(2026, 10, 23, 9, 0, 0), scheduled, 2, 4), false);
+  assert.equal(isWithinWeeklyRunWindow(new Date(2026, 10, 24, 1, 0, 0), scheduled, 2, 4), true);
+  assert.equal(isWithinWeeklyRunWindow(new Date(2026, 10, 24, 9, 0, 0), scheduled, 2, 4), false);
+  assert.equal(isWithinWeeklyRunWindow(new Date(2026, 10, 24, 1, 0, 0), scheduled, 2, 0), false);
 });

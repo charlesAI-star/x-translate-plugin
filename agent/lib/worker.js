@@ -25,6 +25,7 @@ const queue = [];
 const queued = new Set();
 let running = false;
 let currentId = null;
+let currentController = null;
 
 export function enqueue(id) {
   const value = String(id);
@@ -32,6 +33,12 @@ export function enqueue(id) {
   queued.add(value);
   queue.push(value);
   pump();
+}
+
+export function cancelEntry(id) {
+  if (currentId !== String(id) || !currentController) return false;
+  currentController.abort();
+  return true;
 }
 
 function captureFromEntry(entry) {
@@ -79,48 +86,60 @@ async function analyzeEntry(id) {
     return;
   }
 
-  setEntryProcessing(id);
+  if (!setEntryProcessing(id)) return;
   const config = loadConfig();
+  const controller = new AbortController();
+  currentController = controller;
   const attempts = Math.max(1, Number(config.llm.retries || 0) + 1);
   let lastError = null;
 
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      const tree = buildCategoryTree();
-      const capture = captureFromEntry(entry);
-      const prompt = mode === 'classify'
-        ? classifyPrompt({ capture, tree })
-        : singlePrompt({ capture, tree });
-      const result = await llmJson({
-        task: mode === 'classify' ? 'classify' : 'single',
-        prompt,
-        schema: mode === 'classify' ? CLASSIFY_SCHEMA : SINGLE_SCHEMA,
-        system: SYSTEM_PROMPT,
-        timeoutMs: config.llm.timeoutMs
-      });
-      const fresh = getEntry(id);
-      if (!fresh || fresh.deleted_at) return;
-      if (fresh.status !== 'processing') return;
-      if (mode === 'classify') {
-        applyEntryClassification(id, result);
-      } else {
-        applyEntryAnalysis(id, result);
-      }
+  try {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        syncEntryMarkdown(id);
+        const tree = buildCategoryTree();
+        const capture = captureFromEntry(entry);
+        const prompt = mode === 'classify'
+          ? classifyPrompt({ capture, tree })
+          : singlePrompt({ capture, tree });
+        const result = await llmJson({
+          task: mode === 'classify' ? 'classify' : 'single',
+          prompt,
+          schema: mode === 'classify' ? CLASSIFY_SCHEMA : SINGLE_SCHEMA,
+          system: SYSTEM_PROMPT,
+          timeoutMs: config.llm.timeoutMs,
+          signal: controller.signal
+        });
+        if (controller.signal.aborted) return;
+        const fresh = getEntry(id);
+        if (!fresh || fresh.deleted_at) return;
+        if (fresh.status !== 'processing') return;
+        if (mode === 'classify') {
+          applyEntryClassification(id, result);
+        } else {
+          applyEntryAnalysis(id, result);
+        }
+        try {
+          syncEntryMarkdown(id);
+        } catch (err) {
+          console.error(`[worker] Markdown 导出失败 ${id}: ${err.message}`);
+        }
+        return;
       } catch (err) {
-        console.error(`[worker] Markdown 导出失败 ${id}: ${err.message}`);
-      }
-      return;
-    } catch (err) {
-      lastError = err;
-      if (attempt < attempts - 1) {
-        await sleep(Math.min(10000, 1000 * 2 ** attempt));
+        if (controller.signal.aborted || err.code === 'cancelled') {
+          console.log(`[worker] ${id} 已取消`);
+          return;
+        }
+        lastError = err;
+        if (attempt < attempts - 1) {
+          await sleep(Math.min(10000, 1000 * 2 ** attempt));
+        }
       }
     }
+    failIfStillProcessing(id, lastError?.message || '分析失败');
+    console.error(`[worker] ${mode} 失败 ${id}: ${lastError?.message || 'unknown'}`);
+  } finally {
+    if (currentController === controller) currentController = null;
   }
-  failIfStillProcessing(id, lastError?.message || '分析失败');
-  console.error(`[worker] ${mode} 失败 ${id}: ${lastError?.message || 'unknown'}`);
 }
 
 async function pump() {

@@ -19,7 +19,7 @@ import {
   syncEntryMarkdown,
   writeAllSummaries
 } from './lib/markdown.js';
-import { enqueue, getQueueStats, startWorker } from './lib/worker.js';
+import { cancelEntry, enqueue, getQueueStats, startWorker } from './lib/worker.js';
 import {
   approveProposal,
   cancelWeeklyRun,
@@ -248,6 +248,7 @@ async function handlePatchEntry(req, res, id) {
   const entry = store.getEntry(id);
   if (!entry) throw new HttpError(404, 'not_found', '条目不存在');
   if (body.deleted === true) {
+    cancelEntry(id);
     store.softDeleteEntry(id, 'user');
     syncEntryMarkdown(id);
     sendOk(res, { entry: renderEntryForApi(store.getEntry(id)) });

@@ -240,9 +240,10 @@ function firstLine(text) {
 }
 
 export function setEntryProcessing(id) {
-  getDb()
-    .prepare("UPDATE entries SET status = 'processing', error = NULL, updated_at = ? WHERE id = ?")
+  const result = getDb()
+    .prepare("UPDATE entries SET status = 'processing', error = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NULL AND status = 'pending'")
     .run(nowIso(), String(id));
+  return Number(result.changes) > 0;
 }
 
 export function applyEntryAnalysis(id, analysis, options = {}) {

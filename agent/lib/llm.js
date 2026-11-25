@@ -78,7 +78,18 @@ function extractJson(text) {
   return null;
 }
 
-function runClaude({ prompt, schema, system, timeoutMs, maxTurns }) {
+function killChild(child) {
+  try {
+    child.kill('SIGTERM');
+  } catch {}
+  setTimeout(() => {
+    try {
+      child.kill('SIGKILL');
+    } catch {}
+  }, 5000).unref();
+}
+
+function runClaude({ prompt, schema, system, timeoutMs, maxTurns, signal }) {
   const config = loadConfig();
   const args = [
     '-p',
@@ -105,6 +116,10 @@ function runClaude({ prompt, schema, system, timeoutMs, maxTurns }) {
   const childEnv = { ...process.env };
   delete childEnv.KB_TOKEN;
 
+  if (signal?.aborted) {
+    return Promise.reject(new LlmError('模型调用已取消', 'cancelled'));
+  }
+
   return new Promise((resolve, reject) => {
     const child = spawn(config.llm.command || 'claude', args, {
       cwd: AGENT_ROOT,
@@ -114,17 +129,31 @@ function runClaude({ prompt, schema, system, timeoutMs, maxTurns }) {
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let timeout = null;
+    let onAbort = null;
     const limit = 20 * 1024 * 1024;
-    const timeout = setTimeout(() => {
+
+    const settle = (fn, value) => {
       if (settled) return;
       settled = true;
-      child.kill('SIGTERM');
-      setTimeout(() => {
-        try {
-          child.kill('SIGKILL');
-        } catch {}
-      }, 5000).unref();
-      reject(new LlmError('模型调用超时', 'timeout'));
+      if (timeout) clearTimeout(timeout);
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+      fn(value);
+    };
+
+    const cancel = () => {
+      killChild(child);
+      settle(reject, new LlmError('模型调用已取消', 'cancelled'));
+    };
+
+    if (signal) {
+      onAbort = cancel;
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    timeout = setTimeout(() => {
+      killChild(child);
+      settle(reject, new LlmError('模型调用超时', 'timeout'));
     }, timeoutMs || config.llm.timeoutMs || 180000);
 
     child.stdout.on('data', (chunk) => {
@@ -142,23 +171,18 @@ function runClaude({ prompt, schema, system, timeoutMs, maxTurns }) {
     });
     child.stdin.on('error', () => {});
     child.on('error', (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      reject(new LlmError(`无法启动 Claude CLI：${err.message}`, 'cli_unavailable'));
+      settle(reject, new LlmError(`无法启动 Claude CLI：${err.message}`, 'cli_unavailable'));
     });
     child.on('close', (code) => {
       if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
       const parsed = extractJson(stdout);
       if (!parsed) {
         const hint = truncate(stderr.replace(/\s+/g, ' ').trim(), 300);
-        reject(new LlmError(`Claude CLI 未返回 JSON（退出码 ${code}）${hint ? '：' + hint : ''}`, 'bad_output'));
+        settle(reject, new LlmError(`Claude CLI 未返回 JSON（退出码 ${code}）${hint ? '：' + hint : ''}`, 'bad_output'));
         return;
       }
       if (parsed.is_error) {
-        reject(new LlmError(truncate(parsed.result || parsed.subtype || '模型返回错误', 300), 'api_error'));
+        settle(reject, new LlmError(truncate(parsed.result || parsed.subtype || '模型返回错误', 300), 'api_error'));
         return;
       }
       let output = parsed.structured_output;
@@ -166,25 +190,28 @@ function runClaude({ prompt, schema, system, timeoutMs, maxTurns }) {
         output = extractJson(parsed.result);
       }
       if (output === undefined) {
-        reject(new LlmError('模型没有返回结构化结果', 'no_structured_output'));
+        settle(reject, new LlmError('模型没有返回结构化结果', 'no_structured_output'));
         return;
       }
-      resolve(output);
+      settle(resolve, output);
     });
     child.stdin.end(prompt);
   });
 }
 
-export async function llmJson({ task, prompt, schema, system, timeoutMs, maxTurns }) {
+export async function llmJson({ task, prompt, schema, system, timeoutMs, maxTurns, signal }) {
+  if (signal?.aborted) throw new LlmError('模型调用已取消', 'cancelled');
   const config = loadConfig();
   let output;
   if (config.llm.provider === 'mock') {
     output = await mockResponse({ task, prompt, schema });
+    if (signal?.aborted) throw new LlmError('模型调用已取消', 'cancelled');
   } else if (config.llm.provider === 'claude-cli') {
-    output = await runClaude({ prompt, schema, system, timeoutMs, maxTurns });
+    output = await runClaude({ prompt, schema, system, timeoutMs, maxTurns, signal });
   } else {
     throw new LlmError(`不支持的 LLM provider：${config.llm.provider}`, 'bad_provider');
   }
+  if (signal?.aborted) throw new LlmError('模型调用已取消', 'cancelled');
   const errors = validateJsonSchema(output, schema);
   if (errors.length) {
     throw new LlmError(`模型输出不符合结构：${errors.slice(0, 3).join('；')}`, 'invalid_output');

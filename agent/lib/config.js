@@ -36,6 +36,7 @@ const BUILTIN_DEFAULTS = {
     dayOfWeek: 1,
     hour: 2,
     minute: 0,
+    catchUpHours: 4,
     analyzeBatchSize: 20,
     analyzeTextChars: 3000,
     maxL2Actions: 8,
@@ -118,6 +119,10 @@ export function loadConfig() {
   config.weekly.dayOfWeek = Math.min(7, Math.max(1, Number(config.weekly.dayOfWeek) || 1));
   config.weekly.hour = Math.min(23, Math.max(0, Number(config.weekly.hour) || 0));
   config.weekly.minute = Math.min(59, Math.max(0, Number(config.weekly.minute) || 0));
+  const catchUpHours = Number(config.weekly.catchUpHours);
+  config.weekly.catchUpHours = Number.isFinite(catchUpHours)
+    ? Math.min(24, Math.max(0, catchUpHours))
+    : 4;
   config.weekly.analyzeBatchSize = Math.min(50, Math.max(1, Number(config.weekly.analyzeBatchSize) || 20));
   config.weekly.analyzeTextChars = Math.min(20000, Math.max(500, Number(config.weekly.analyzeTextChars) || 3000));
   config.weekly.maxL2Actions = Math.min(50, Math.max(0, Number(config.weekly.maxL2Actions) || 0));

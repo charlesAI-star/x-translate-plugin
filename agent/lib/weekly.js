@@ -1188,6 +1188,20 @@ export function rollbackWeeklyRun(id) {
   return { ok: true, restored, skipped };
 }
 
+export function isWithinWeeklyRunWindow(now, scheduled, hour, catchUpHours) {
+  const elapsed = now.getTime() - scheduled.getTime();
+  if (elapsed < 0) return false;
+  const hours = Number(catchUpHours);
+  const catchUp = Number.isFinite(hours) ? Math.max(0, hours) : 4;
+  if (catchUp === 0) return elapsed < 60_000;
+  if (elapsed <= catchUp * 3600_000) return true;
+  // 错过补跑窗口后，只在计划时段附近的夜间窗口补跑，避免白天占用机器。
+  const start = Math.max(0, Number(hour) - 2);
+  const end = Math.min(24, Number(hour) + 4);
+  const current = now.getHours() + now.getMinutes() / 60;
+  return current >= start && current < end;
+}
+
 export function checkSchedule() {
   const config = loadConfig();
   if (!config.weekly.enabled) return;
@@ -1199,7 +1213,7 @@ export function checkSchedule() {
     config.weekly.hour,
     config.weekly.minute
   );
-  if (now < scheduled) return;
+  if (!isWithinWeeklyRunWindow(now, scheduled, config.weekly.hour, config.weekly.catchUpHours)) return;
   const key = weekKey(now);
   if (store.hasWeeklyRun(key)) return;
   if (store.getStats().total === 0) return;
