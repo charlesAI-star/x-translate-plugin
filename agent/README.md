@@ -214,6 +214,50 @@ agent/data/
 
 ---
 
+## 部署到运行目录
+
+开发源码始终在仓库的 `agent/` 下；`/Users/programs/x-knowledge` 这类运行目录只放部署产物，不建 Git 仓库、不直接改代码。
+
+推荐目录：
+
+```text
+/Users/programs/x-knowledge/
+  app/            # 从 agent/ 同步的代码
+  config.json     # 运行环境配置（首次创建，之后保留）
+  data/           # kb.sqlite、captures、library、reports
+  logs/
+  backups/
+```
+
+首次部署前先预览，再执行：
+
+```bash
+cd /path/to/x-translate-plugin/agent
+scripts/deploy.sh --target /Users/programs/x-knowledge --dry-run
+scripts/deploy.sh --target /Users/programs/x-knowledge
+```
+
+脚本会先跑 Agent 测试，然后：
+
+- 将代码同步到 `app/`，排除 `data/`、`config.json`、`test/`、`scripts/`；
+- 首次部署时从 `config.json` 创建运行配置，之后不覆盖；
+- 同步前把旧代码备份到 `backups/`；
+- 不触碰 `data/`，升级代码不会影响知识库。
+
+启动时显式指定配置和数据目录：
+
+```bash
+KB_CONFIG=/Users/programs/x-knowledge/config.json \
+KB_DATA_DIR=/Users/programs/x-knowledge/data \
+node /Users/programs/x-knowledge/app/server.js
+```
+
+需要长期稳定运行时，建议用 macOS `launchd` 或 `pm2` 托管，并在启动环境中显式配置 `node`、`claude` 的路径以及 Claude CLI 依赖的环境变量（例如本地路由的 `ANTHROPIC_BASE_URL`）。终端关闭后前台进程会停止。
+
+> 部署脚本默认要求源码没有未提交改动；开发中预览可用 `--dry-run`，确需从工作区部署时加 `--allow-dirty`。
+
+---
+
 ## 配置
 
 默认读取 `agent/config.json`，也支持环境变量覆盖：
