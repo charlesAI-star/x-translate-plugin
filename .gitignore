@@ -18,3 +18,5 @@ test/.tmp/
 
 # Local agent runtime data
 agent/data/
+agent/config.json
+agent/config.local.json

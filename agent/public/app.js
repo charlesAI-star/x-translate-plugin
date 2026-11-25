@@ -660,7 +660,14 @@
       );
     }
 
-    if (entry.status === 'saved') {
+    if (entry.status === 'processing') {
+      body.append(
+        el('div', {
+          class: 'notice',
+          text: '这条内容正在整理中，请稍候；整理完成前请勿删除，删除会中断当前任务。'
+        })
+      );
+    } else if (entry.status === 'saved') {
       body.append(
         el('div', {
           class: 'notice',
@@ -1097,7 +1104,10 @@
   async function deleteEntry() {
     const entry = state.entry;
     if (!entry) return;
-    if (!window.confirm('删除这条内容？会先进入回收站。')) return;
+    const message = entry.status === 'processing'
+      ? '这条内容正在整理，删除会中断本次任务。确定移入回收站？'
+      : '删除这条内容？会先进入回收站。';
+    if (!window.confirm(message)) return;
     await run(async () => {
       await api(`/api/entries/${encodeURIComponent(entry.id)}`, {
         method: 'PATCH',
@@ -1240,7 +1250,7 @@
           'div',
           { class: 'empty' },
           el('h3', { text: '还没有周报' }),
-          el('p', { text: '点击「立即整理」开始第一次全量整理。也可以等待每周一 09:00 的自动任务。' })
+          el('p', { text: '点击「立即整理」开始第一次全量整理。也可以等待每周一 02:00 的自动任务。' })
         )
       );
       return;

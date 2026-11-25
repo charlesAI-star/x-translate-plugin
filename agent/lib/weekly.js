@@ -344,6 +344,7 @@ async function governPhase(state, run) {
           from: from.name,
           into: into.name,
           moved: moved.moved,
+          manual_overrides: moved.manual_overrides || [],
           reason: action.reason
         });
         appliedCount += 1;
@@ -361,6 +362,7 @@ async function governPhase(state, run) {
           key: action.key,
           name: category.name,
           moved: resultArchive.moved,
+          manual_overrides: resultArchive.manual_overrides || [],
           reason: action.reason
         });
         appliedCount += 1;
@@ -462,11 +464,13 @@ async function analyzePhase(state, run) {
     for (let i = 0; i < ids.length; i += batchSize) {
       batches.push(ids.slice(i, i + batchSize));
     }
+    const ratioValue = Number(config.weekly.maxCategoryChangesRatio);
+    const ratio = Number.isFinite(ratioValue) ? ratioValue : 0.3;
     const maxCategoryChanges = Math.min(
       500,
       Math.max(
         Number(config.weekly.minCategoryChanges) || 0,
-        Math.ceil(all.length * (Number(config.weekly.maxCategoryChangesRatio) || 0.3))
+        Math.ceil(all.length * ratio)
       )
     );
     state.analyze = {
@@ -550,22 +554,42 @@ async function analyzePhase(state, run) {
         const l2 = resolveL2ForChange(maps, l1.key, item.category_l2);
         if (l2.invalid) {
           progress.warnings.push({ entry_id: entry.id, message: '二级分类不存在，忽略该建议' });
-        }
-        const confidence = Number(item.confidence) || 0;
-        const different =
-          entry.category_l1 !== l1.key || (entry.category_l2 || null) !== (l2.key || null);
-        if (different && confidence >= 0.7 && progress.category_changes.length < progress.max_category_changes) {
-          categoryMode = 'force';
-          targetL1 = l1.key;
-          targetL2 = l2.key;
         } else {
-          if (different && confidence >= 0.7) progress.skipped_category_changes += 1;
-          categoryMode = 'keep';
+          const confidence = Number(item.confidence) || 0;
+          const different =
+            entry.category_l1 !== l1.key || (entry.category_l2 || null) !== (l2.key || null);
+          if (different && confidence >= 0.7 && progress.category_changes.length < progress.max_category_changes) {
+            categoryMode = 'force';
+            targetL1 = l1.key;
+            targetL2 = l2.key;
+          } else {
+            if (different && confidence >= 0.7) progress.skipped_category_changes += 1;
+            categoryMode = 'keep';
+          }
         }
       }
 
       try {
-        store.applyEntryAnalysis(
+        // The batch prompt can take a while; re-read before applying so a user
+        // move during the model call is not overwritten by a stale snapshot.
+        const before = store.getEntry(entry.id);
+        if (!before || before.deleted_at) {
+          progress.warnings.push({ entry_id: entry.id, message: '条目已删除，跳过本次分析结果' });
+          continue;
+        }
+        let applyMode = categoryMode;
+        let applyL1 = targetL1;
+        let applyL2 = targetL2;
+        if (applyMode === 'force' &&
+            before.category_l1 === targetL1 &&
+            (before.category_l2 || null) === (targetL2 || null)) {
+          applyMode = 'keep';
+        }
+        if (applyMode === 'keep') {
+          applyL1 = before.category_l1;
+          applyL2 = before.category_l2;
+        }
+        const updated = store.applyEntryAnalysis(
           entry.id,
           {
             title: item.title,
@@ -574,47 +598,43 @@ async function analyzePhase(state, run) {
             key_points: item.key_points,
             content_type: item.content_type,
             language: item.language,
-            category_l1: categoryMode === 'force' ? targetL1 : entry.category_l1,
-            category_l2: categoryMode === 'force' ? targetL2 : entry.category_l2
+            category_l1: applyL1,
+            category_l2: applyL2
           },
           {
-            categoryMode,
+            categoryMode: applyMode,
             actor: 'agent',
             batchId: run.id,
             confidence: item.confidence,
             reason: item.reason || '每周重新分析'
           }
         );
+        if (!updated) {
+          progress.warnings.push({ entry_id: entry.id, message: '条目已删除，跳过本次分析结果' });
+          continue;
+        }
         progress.analyzed += 1;
-        synced.push(entry.id);
-        entry.title = item.title;
-        entry.summary = item.summary;
-        entry.tags = item.tags || [];
-        entry.status = 'ready';
-        entry.processing_mode = 'full';
-        if (categoryMode === 'force') {
+        synced.push(updated.id);
+        if (applyMode === 'force') {
           progress.category_changes.push({
-            entry_id: entry.id,
-            title: item.title,
+            entry_id: updated.id,
+            title: updated.title,
             from: {
-              l1: entry.category_l1,
-              l2: entry.category_l2,
-              l1_name: l1Name(maps, entry.category_l1),
-              l2_name: l2Name(maps, entry.category_l2)
+              l1: before.category_l1,
+              l2: before.category_l2,
+              l1_name: l1Name(maps, before.category_l1),
+              l2_name: l2Name(maps, before.category_l2)
             },
             to: {
-              l1: targetL1,
-              l2: targetL2,
-              l1_name: l1Name(maps, targetL1),
-              l2_name: l2Name(maps, targetL2)
+              l1: updated.category_l1,
+              l2: updated.category_l2,
+              l1_name: updated.category_l1_name || l1Name(maps, updated.category_l1),
+              l2_name: updated.category_l2_name || l2Name(maps, updated.category_l2)
             },
             confidence: item.confidence,
             reason: item.reason,
-            manual_override: entry.category_source === 'manual'
+            manual_override: before.category_source === 'manual'
           });
-          entry.category_l1 = targetL1;
-          entry.category_l2 = targetL2;
-          entry.category_source = 'auto';
         }
       } catch (err) {
         progress.warnings.push({ entry_id: entry.id, message: err.message });
@@ -727,6 +747,13 @@ function fallbackReport(state, run, proposals, summaries) {
   const scan = state.scan || {};
   const analyze = state.analyze || {};
   const changes = analyze.category_changes || [];
+  const governManual = (state.govern?.actions || []).flatMap(
+    (action) => action.manual_overrides || []
+  );
+  const manualChanges = [
+    ...changes.filter((change) => change.manual_override),
+    ...governManual
+  ];
   const lines = [
     `# ${run.week_key} 知识周报`,
     '',
@@ -747,7 +774,7 @@ function fallbackReport(state, run, proposals, summaries) {
     lines.push('本周没有可用的分类总结。', '');
   }
   lines.push('## 本周优先学习', '');
-  const manual = changes.filter((change) => change.manual_override).slice(0, 5);
+  const manual = manualChanges.slice(0, 5);
   if (manual.length) {
     lines.push('以下条目你手动设置过分类，本周被重新分类，建议优先复核：', '');
     for (const change of manual) {
@@ -811,11 +838,18 @@ async function reportPhase(state, run) {
       category: l1Name(maps, entry.category_l1)
     }));
   const analyze = state.analyze || {};
+  const governManualOverrides = (state.govern?.actions || []).flatMap(
+    (action) => action.manual_overrides || []
+  );
+  const manualOverrides = [
+    ...(analyze.category_changes || []).filter((change) => change.manual_override),
+    ...governManualOverrides
+  ];
   const changes = {
     l2_actions: state.govern?.actions || [],
     analyzed: analyze.analyzed || 0,
     category_changes: analyze.category_changes || [],
-    manual_overrides: (analyze.category_changes || []).filter((change) => change.manual_override),
+    manual_overrides: manualOverrides,
     counts: {
       analyzed: analyze.analyzed || 0,
       category_changes: (analyze.category_changes || []).length,
@@ -1014,8 +1048,12 @@ export function resumeWeeklyRun(id) {
   if (run.status === 'running') {
     return { ok: false, error: { code: 'busy', message: '任务仍在运行' } };
   }
-  if (run.status === 'completed') {
-    return { ok: false, error: { code: 'done', message: '任务已完成' } };
+  if (['completed', 'cancelled'].includes(run.status)) {
+    return { ok: false, error: { code: 'done', message: '任务已结束' } };
+  }
+  const active = store.getActiveWeeklyRun();
+  if (active && active.id !== run.id) {
+    return { ok: false, error: { code: 'busy', message: `已有整理任务 ${active.id} 在运行` } };
   }
   cancelledRuns.delete(run.id);
   store.updateWeeklyRun(run.id, {
@@ -1037,7 +1075,17 @@ export function cancelWeeklyRun(id) {
     return { ok: false, error: { code: 'not_running', message: '任务不在运行中' } };
   }
   cancelledRuns.add(run.id);
-  store.requestWeeklyCancel(run.id);
+  if (run.status === 'interrupted') {
+    // 没有 runner 会再消费 cancel_requested；直接落成终态，避免永久阻塞后续周任务。
+    store.updateWeeklyRun(run.id, {
+      status: 'cancelled',
+      cancel_requested: 1,
+      error: '任务已取消',
+      finished_at: nowIso()
+    });
+  } else {
+    store.requestWeeklyCancel(run.id);
+  }
   return { ok: true, run: store.getWeeklyRun(run.id) };
 }
 

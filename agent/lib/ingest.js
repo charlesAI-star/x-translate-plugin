@@ -50,7 +50,7 @@ export function ingestCapture(raw) {
 
   const existing = db.prepare('SELECT id FROM captures WHERE id = ?').get(capture.id);
   if (existing) {
-    const entry = db.prepare('SELECT id, status FROM entries WHERE id = ?').get(capture.id);
+    const entry = db.prepare('SELECT id, status, processing_mode FROM entries WHERE id = ?').get(capture.id);
     if (!entry) {
       createEntryFromCapture(capture, mode);
       if (mode === 'save') syncSavedEntry(capture.id);
@@ -58,8 +58,9 @@ export function ingestCapture(raw) {
       return duplicateResult(capture.id, mode, true);
     }
     if (entry.status === 'pending') {
+      const upgraded = upgradeEntryMode(capture.id, mode);
       enqueue(capture.id);
-      return duplicateResult(capture.id, mode, false);
+      return duplicateResult(capture.id, upgraded ? mode : entry.processing_mode, upgraded);
     }
     if (entry.status === 'failed' && mode !== 'save') {
       if (prepareEntryForRetry(capture.id, mode)) {

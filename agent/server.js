@@ -73,6 +73,13 @@ function authorized(req) {
   return String(req.headers.authorization || '') === `Bearer ${token}`;
 }
 
+function requireJsonRequest(req) {
+  const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  if (!contentType.includes('application/json')) {
+    throw new HttpError(415, 'unsupported_media_type', 'Content-Type 必须是 application/json');
+  }
+}
+
 function readBody(req, limit) {
   return new Promise((resolve, reject) => {
     const declared = Number(req.headers['content-length'] || 0);
@@ -156,13 +163,14 @@ function serveStatic(req, res, pathname) {
 async function handleHealth(req, res) {
   const config = loadConfig();
   const llm = checkLlm();
+  const queue = getQueueStats();
   sendOk(res, {
     service: config.serviceName || 'x-knowledge-agent',
     version: VERSION,
     schema: 'xtr.capture/1',
     authRequired: Boolean(config.token),
     llm: llm.ok ? 'ok' : 'unavailable',
-    queue: getQueueStats()
+    queue: { queued: queue.queued, running: queue.running }
   });
 }
 
@@ -247,6 +255,8 @@ async function handlePatchEntry(req, res, id) {
   }
   if (body.restore === true) {
     store.restoreEntry(id, 'user');
+    const restored = store.getEntry(id);
+    if (restored && restored.status === 'pending') enqueue(id);
     syncEntryMarkdown(id);
     sendOk(res, { entry: renderEntryForApi(store.getEntry(id)) });
     return;
@@ -271,6 +281,7 @@ async function handlePatchEntry(req, res, id) {
 async function handleEntryAction(req, res, id, action) {
   const entry = store.getEntry(id);
   if (!entry) throw new HttpError(404, 'not_found', '条目不存在');
+  if (entry.deleted_at) throw new HttpError(404, 'not_found', '条目在回收站中');
   if (action === 'retry') {
     if (entry.status === 'processing') throw new HttpError(409, 'busy', '这条内容正在处理');
     store.retryEntry(id);
@@ -493,6 +504,9 @@ async function route(req, res) {
   if (pathname.startsWith('/api/') && !authorized(req)) {
     throw new HttpError(401, 'unauthorized', '需要有效的 Token');
   }
+  if (pathname.startsWith('/api/') && (method === 'POST' || method === 'PATCH')) {
+    requireJsonRequest(req);
+  }
 
   if (method === 'GET' && pathname === '/api/status') return handleStatus(req, res);
   if (method === 'GET' && pathname === '/api/entries') return handleListEntries(req, res, url);
@@ -542,22 +556,25 @@ async function route(req, res) {
 
 async function handler(req, res) {
   const started = Date.now();
-  const url = new URL(req.url, 'http://localhost');
+  let pathname = '/';
   try {
+    const url = new URL(req.url, 'http://localhost');
+    pathname = url.pathname;
     await route(req, res);
   } catch (err) {
-    const status = err instanceof HttpError ? err.status : 500;
-    const code = err instanceof HttpError ? err.code : 'internal_error';
-    const message = err instanceof HttpError ? err.message : '服务内部错误';
+    const invalidUrl = err && err.code === 'ERR_INVALID_URL';
+    const status = err instanceof HttpError ? err.status : invalidUrl ? 400 : 500;
+    const code = err instanceof HttpError ? err.code : invalidUrl ? 'invalid_url' : 'internal_error';
+    const message = err instanceof HttpError ? err.message : invalidUrl ? '请求地址无效' : '服务内部错误';
     if (!res.headersSent) sendError(res, status, code, message);
     if (status === 413) {
       try {
         req.resume();
       } catch {}
     }
-    if (status >= 500) console.error(`[http] ${req.method} ${url.pathname} ${status}: ${err.message}`);
+    if (status >= 500) console.error(`[http] ${req.method} ${pathname} ${status}: ${err.message}`);
   } finally {
-    console.log(`[http] ${req.method} ${url.pathname} ${res.statusCode} ${Date.now() - started}ms`);
+    console.log(`[http] ${req.method} ${pathname} ${res.statusCode} ${Date.now() - started}ms`);
   }
 }
 

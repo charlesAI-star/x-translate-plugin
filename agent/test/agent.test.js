@@ -26,6 +26,7 @@ let server;
 let base = '';
 const llmCalls = [];
 let categoryChangeTarget = 'product';
+let invalidL2Entry = null;
 
 function extractEntries(prompt) {
   const match = String(prompt).match(/<entries>\n([\s\S]*?)\n<\/entries>/);
@@ -69,7 +70,7 @@ setMockHandler(({ task, prompt }) => {
         title: `周分析标题 ${index + 1}`,
         summary: `周分析摘要 ${index + 1}`,
         category_l1: categoryChangeTarget,
-        category_l2: '',
+        category_l2: entry.entry_id === invalidL2Entry ? '完全不存在的二级' : '',
         tags: ['周分析'],
         key_points: [`周分析要点 ${index + 1}`],
         content_type: 'insight',
@@ -200,6 +201,8 @@ test('health is public and reports schema', async () => {
   assert.equal(result.data.ok, true);
   assert.equal(result.data.schema, 'xtr.capture/1');
   assert.equal(result.data.authRequired, true);
+  assert.equal(result.data.queue.currentId, undefined);
+  assert.equal(typeof result.data.queue.queued, 'number');
 });
 
 test('serves the web UI', async () => {
@@ -444,4 +447,145 @@ test('startup recovery marks stale running weekly runs interrupted', () => {
   const run = store.getWeeklyRun('stale-run');
   assert.equal(run.status, 'interrupted');
   assert.match(run.error, /中断/);
+});
+
+test('mutating API actions require a JSON content type', async () => {
+  const noType = await fetch(`${base}/api/entries/x:tweet:full-1/retry`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer test-token' }
+  });
+  assert.equal(noType.status, 415);
+
+  const formType = await fetch(`${base}/api/entries/x:tweet:full-1/retry`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer test-token', 'Content-Type': 'text/plain' },
+    body: '{}'
+  });
+  assert.equal(formType.status, 415);
+});
+
+test('category names cannot escape the markdown library path', async () => {
+  const { safePathPart } = await import('../lib/util.js');
+  assert.equal(safePathPart('..'), '未分类');
+  assert.equal(safePathPart('.'), '未分类');
+  assert.equal(safePathPart('foo/../../bar'), 'foo_.._.._bar');
+});
+
+test('canceling an interrupted weekly run clears the active run', async () => {
+  const { cancelWeeklyRun } = await import('../lib/weekly.js');
+  const result = cancelWeeklyRun('stale-run');
+  assert.equal(result.ok, true);
+  assert.equal(result.run.status, 'cancelled');
+  assert.equal(store.getActiveWeeklyRun(), null);
+});
+
+test('resume refuses to start a second weekly run', async () => {
+  const { resumeWeeklyRun } = await import('../lib/weekly.js');
+  store.createWeeklyRun({ id: 'resume-a', weekKey: '2099-W02', trigger: 'manual', status: 'failed' });
+  store.createWeeklyRun({ id: 'resume-b', weekKey: '2099-W03', trigger: 'manual', status: 'running' });
+  const result = resumeWeeklyRun('resume-a');
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'busy');
+  store.updateWeeklyRun('resume-b', {
+    status: 'cancelled',
+    finished_at: new Date().toISOString()
+  });
+});
+
+test('an invalid L2 suggestion does not wipe an existing L2', async () => {
+  const category = await api('/api/categories', {
+    method: 'POST',
+    body: { level: 2, parentKey: 'ai', name: 'L2 保留测试' }
+  });
+  assert.equal(category.status, 201);
+  const l2Key = category.data.category.key;
+  const moved = await api('/api/entries/x:tweet:classify-1', {
+    method: 'PATCH',
+    body: { category_l1: 'ai', category_l2: l2Key }
+  });
+  assert.equal(moved.status, 200);
+  assert.equal(moved.data.entry.category_l2, l2Key);
+
+  invalidL2Entry = 'x:tweet:classify-1';
+  const weekly = await runWeeklyToCompletion();
+  assert.equal(weekly.run.status, 'completed');
+  const after = await entry('x:tweet:classify-1');
+  assert.equal(after.category_l1, 'ai');
+  assert.equal(after.category_l2, l2Key);
+  invalidL2Entry = null;
+});
+
+test('re-sending a pending entry upgrades its mode before the worker starts', async () => {
+  const id = 'x:tweet:pending-upgrade-1';
+  const saved = await api('/ingest', {
+    method: 'POST',
+    body: capture(id, '这是一条排队中的内容。', 'save')
+  });
+  assert.equal(saved.status, 202);
+  store.updateEntryMode(id, 'classify');
+  assert.equal(store.getEntry(id).status, 'pending');
+
+  const upgraded = await api('/ingest', {
+    method: 'POST',
+    body: capture(id, '这是一条排队中的内容。', 'full')
+  });
+  assert.equal(upgraded.status, 202);
+  assert.equal(upgraded.data.status, 'queued');
+  assert.equal(upgraded.data.processingMode, 'full');
+  const ready = await waitStatus(id, ['ready']);
+  assert.equal(ready.processing_mode, 'full');
+  assert.equal(ready.summary, '这是一条完整分析摘要。');
+});
+
+test('deleting and restoring a processing entry resets it to pending', () => {
+  const id = 'x:tweet:full-1';
+  store.setEntryProcessing(id);
+  assert.equal(store.getEntry(id).status, 'processing');
+  store.softDeleteEntry(id);
+  let current = store.getEntry(id);
+  assert.ok(current.deleted_at);
+  assert.equal(current.status, 'pending');
+  store.restoreEntry(id);
+  current = store.getEntry(id);
+  assert.equal(current.deleted_at, null);
+  assert.equal(current.status, 'pending');
+});
+
+test('pending entries can be upgraded to a more complete mode', () => {
+  const id = 'x:tweet:full-1';
+  store.updateEntryMode(id, 'classify');
+  assert.equal(store.getEntry(id).status, 'pending');
+  assert.equal(store.upgradeEntryMode(id, 'full'), true);
+  const current = store.getEntry(id);
+  assert.equal(current.processing_mode, 'full');
+  assert.equal(current.status, 'pending');
+});
+
+test('a category cannot be archived or merged into itself', () => {
+  const category = store.createCategory({
+    level: 2,
+    parentKey: 'ai',
+    name: '自归档测试',
+    createdBy: 'user'
+  });
+  assert.throws(() => store.archiveCategory(category.key, { targetKey: category.key }), /自身/);
+  assert.throws(() => store.mergeCategories(category.key, category.key), /自身/);
+});
+
+test('governance moves report manual overrides', () => {
+  const category = store.createCategory({
+    level: 2,
+    parentKey: 'ai',
+    name: '治理覆盖测试',
+    createdBy: 'user'
+  });
+  store.moveEntry('x:tweet:pending-upgrade-1', {
+    category_l1: 'ai',
+    category_l2: category.key,
+    actor: 'user'
+  });
+  assert.equal(store.getEntry('x:tweet:pending-upgrade-1').category_source, 'manual');
+  const result = store.archiveCategory(category.key, { actor: 'agent', batchId: 'test-govern' });
+  assert.equal(result.moved, 1);
+  assert.ok(result.manual_overrides.some((item) => item.entry_id === 'x:tweet:pending-upgrade-1'));
 });

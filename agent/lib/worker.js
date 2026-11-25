@@ -58,6 +58,12 @@ function captureFromEntry(entry) {
   };
 }
 
+function failIfStillProcessing(id, message) {
+  const fresh = getEntry(id);
+  if (!fresh || fresh.deleted_at || fresh.status !== 'processing') return;
+  setEntryFailed(id, message);
+}
+
 async function analyzeEntry(id) {
   const entry = getEntry(id);
   if (!entry || entry.deleted_at || entry.status !== 'pending') return;
@@ -113,7 +119,7 @@ async function analyzeEntry(id) {
       }
     }
   }
-  setEntryFailed(id, lastError?.message || '分析失败');
+  failIfStillProcessing(id, lastError?.message || '分析失败');
   console.error(`[worker] ${mode} 失败 ${id}: ${lastError?.message || 'unknown'}`);
 }
 
@@ -130,7 +136,7 @@ async function pump() {
       console.log(`[worker] ${id} 处理完成 ${Date.now() - started}ms`);
     } catch (err) {
       console.error(`[worker] ${id} 异常: ${err.message}`);
-      setEntryFailed(id, err.message || '分析异常');
+      failIfStillProcessing(id, err.message || '分析异常');
     } finally {
       currentId = null;
     }

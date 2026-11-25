@@ -10,7 +10,8 @@
     "timeoutMs": 180000,
     "maxTurns": 3,
     "maxBudgetUsd": 0.5,
-    "retries": 2
+    "retries": 2,
+    "safeMode": true
   },
   "categories": [
     {
@@ -57,7 +58,7 @@
   "weekly": {
     "enabled": true,
     "dayOfWeek": 1,
-    "hour": 9,
+    "hour": 2,
     "minute": 0,
     "analyzeBatchSize": 20,
     "analyzeTextChars": 3000,

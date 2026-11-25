@@ -421,7 +421,7 @@ export function upgradeEntryMode(id, mode) {
   const entry = getEntry(id);
   if (!entry || entry.deleted_at) return false;
   if (rank[mode] <= rank[entry.processing_mode || 'full']) return false;
-  if (!['saved', 'classified', 'failed'].includes(entry.status)) return false;
+  if (!['saved', 'classified', 'failed', 'pending'].includes(entry.status)) return false;
   updateEntryMode(id, mode);
   return true;
 }
@@ -525,7 +525,14 @@ export function moveEntry(id, options = {}) {
 export function softDeleteEntry(id, actor = 'user') {
   const now = nowIso();
   const result = getDb()
-    .prepare('UPDATE entries SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+    .prepare(`
+      UPDATE entries
+      SET deleted_at = ?,
+        status = CASE WHEN status = 'processing' THEN 'pending' ELSE status END,
+        error = CASE WHEN status = 'processing' THEN NULL ELSE error END,
+        updated_at = ?
+      WHERE id = ? AND deleted_at IS NULL
+    `)
     .run(now, now, String(id));
   if (Number(result.changes) > 0) {
     recordEvent({ entryId: String(id), type: 'delete', actor, payload: {} });
@@ -536,7 +543,14 @@ export function softDeleteEntry(id, actor = 'user') {
 export function restoreEntry(id, actor = 'user') {
   const now = nowIso();
   const result = getDb()
-    .prepare('UPDATE entries SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL')
+    .prepare(`
+      UPDATE entries
+      SET deleted_at = NULL,
+        status = CASE WHEN status = 'processing' THEN 'pending' ELSE status END,
+        error = CASE WHEN status = 'processing' THEN NULL ELSE error END,
+        updated_at = ?
+      WHERE id = ? AND deleted_at IS NOT NULL
+    `)
     .run(now, String(id));
   if (Number(result.changes) > 0) {
     recordEvent({ entryId: String(id), type: 'restore', actor, payload: {} });
@@ -752,6 +766,11 @@ export function archiveCategory(key, { targetKey = null, actor = 'agent', batchI
         err.code = 'bad_category';
         throw err;
       }
+      if (targetCat.key === category.key) {
+        const err = new Error('不能把二级分类归档到自身');
+        err.code = 'bad_category';
+        throw err;
+      }
       target = { l1: targetCat.parent_key, l2: targetCat.key };
     } else {
       target = { l1: category.parent_key, l2: null };
@@ -769,10 +788,14 @@ export function archiveCategory(key, { targetKey = null, actor = 'agent', batchI
   const moves = category.level === 2
     ? db.prepare('SELECT id FROM entries WHERE category_l2 = ? AND deleted_at IS NULL').all(String(key))
     : db.prepare('SELECT id FROM entries WHERE category_l1 = ? AND deleted_at IS NULL').all(String(key));
+  const manualOverrides = [];
 
   tx(() => {
     for (const row of moves) {
       const before = db.prepare('SELECT * FROM entries WHERE id = ?').get(row.id);
+      const manualOverride = actor === 'agent' && before.category_source === 'manual';
+      const beforeL1 = getCategory(before.category_l1);
+      const beforeL2 = before.category_l2 ? getCategory(before.category_l2) : null;
       db.prepare(`
         UPDATE entries SET category_l1 = ?, category_l2 = ?, category_source = 'auto',
           category_updated_at = ?, updated_at = ? WHERE id = ?
@@ -784,10 +807,31 @@ export function archiveCategory(key, { targetKey = null, actor = 'agent', batchI
         payload: {
           from: { l1: before.category_l1, l2: before.category_l2 },
           to: target,
-          reason: '分类归档迁移'
+          reason: '分类归档迁移',
+          manual_override: manualOverride
         },
         batchId
       });
+      if (manualOverride) {
+        manualOverrides.push({
+          entry_id: row.id,
+          title: before.title || row.id,
+          from: {
+            l1: before.category_l1,
+            l2: before.category_l2,
+            l1_name: beforeL1?.name || before.category_l1,
+            l2_name: beforeL2?.name || before.category_l2
+          },
+          to: {
+            l1: target.l1,
+            l2: target.l2,
+            l1_name: getCategory(target.l1)?.name || target.l1,
+            l2_name: target.l2 ? getCategory(target.l2)?.name || target.l2 : null
+          },
+          reason: '分类归档迁移',
+          manual_override: true
+        });
+      }
     }
     if (category.level === 1) {
       db.prepare("UPDATE categories SET status = 'archived', updated_at = ? WHERE parent_key = ? AND status = 'active'")
@@ -802,7 +846,7 @@ export function archiveCategory(key, { targetKey = null, actor = 'agent', batchI
       batchId
     });
   });
-  return { moved: moves.length, target };
+  return { moved: moves.length, target, manual_overrides: manualOverrides };
 }
 
 export function mergeCategories(fromKey, intoKey, { actor = 'agent', batchId = null } = {}) {
@@ -816,6 +860,11 @@ export function mergeCategories(fromKey, intoKey, { actor = 'agent', batchId = n
   }
   if (from.level !== into.level) {
     const err = new Error('只能合并同一层级的分类');
+    err.code = 'bad_category';
+    throw err;
+  }
+  if (String(from.key) === String(into.key)) {
+    const err = new Error('不能把分类合并到自身');
     err.code = 'bad_category';
     throw err;
   }

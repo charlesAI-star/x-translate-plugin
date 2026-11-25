@@ -104,10 +104,25 @@ export function buildEntryMarkdown(entry) {
   return lines.join('\n');
 }
 
+function resolveWithin(base, ...parts) {
+  const root = path.resolve(base);
+  const target = path.resolve(root, ...parts);
+  const relative = path.relative(root, target);
+  if (
+    !relative ||
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(`导出路径越界：${target}`);
+  }
+  return target;
+}
+
 function entryFilePath(entry) {
   const l1 = safePathPart(entry.category_l1_name || entry.category_l1, '未分类');
   const l2 = entry.category_l2_name ? safePathPart(entry.category_l2_name) : '_';
-  return path.join(libraryDir(), l1, l2, `${safeFileId(entry.id)}.md`);
+  return resolveWithin(libraryDir(), l1, l2, `${safeFileId(entry.id)}.md`);
 }
 
 export function syncEntryMarkdown(id) {
@@ -163,7 +178,7 @@ export function syncAllActiveEntries() {
 export function writeReportMarkdown(weekKey, markdown) {
   const dir = reportsDir();
   ensureDir(dir);
-  const file = path.join(dir, `${safePathPart(weekKey, 'report')}.md`);
+  const file = resolveWithin(dir, `${safePathPart(weekKey, 'report')}.md`);
   atomicWrite(file, markdown);
   return file;
 }
@@ -171,7 +186,8 @@ export function writeReportMarkdown(weekKey, markdown) {
 export function writeSummaryMarkdown(categoryKey, categoryName, markdown) {
   const dir = path.join(libraryDir(), '_summaries');
   ensureDir(dir);
-  const file = path.join(dir, `${safePathPart(categoryName || categoryKey)}.md`);
+  // 用稳定的分类 key 命名，改名后不会留下旧文件。
+  const file = resolveWithin(dir, `${safePathPart(categoryKey, 'summary')}.md`);
   atomicWrite(file, markdown);
   return file;
 }

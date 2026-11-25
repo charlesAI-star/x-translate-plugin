@@ -32,8 +32,10 @@ export function safePathPart(name, fallback = '未分类') {
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
     .replace(/\s+/g, ' ')
     .trim()
+    .replace(/[. ]+$/g, '')
     .slice(0, 60);
-  return value || fallback;
+  if (!value || value === '.' || value === '..') return fallback;
+  return value;
 }
 
 export function escapeHtml(value) {

@@ -92,15 +92,23 @@ function runClaude({ prompt, schema, system, timeoutMs, maxTurns }) {
     String(maxTurns || config.llm.maxTurns || 3),
     '--max-budget-usd',
     String(config.llm.maxBudgetUsd || 0.5),
-    '--no-session-persistence'
+    '--no-session-persistence',
+    // 不依赖黑名单：显式清空工具集，并忽略本机 MCP 配置。
+    '--tools',
+    '',
+    '--strict-mcp-config'
   ];
+  if (config.llm.safeMode !== false) args.push('--safe-mode');
   if (system) args.push('--append-system-prompt', system);
   args.push('--disallowedTools', ...TOOL_NAMES);
+
+  const childEnv = { ...process.env };
+  delete childEnv.KB_TOKEN;
 
   return new Promise((resolve, reject) => {
     const child = spawn(config.llm.command || 'claude', args, {
       cwd: AGENT_ROOT,
-      env: process.env,
+      env: childEnv,
       stdio: ['pipe', 'pipe', 'pipe']
     });
     let stdout = '';

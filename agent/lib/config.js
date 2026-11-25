@@ -18,7 +18,8 @@ const BUILTIN_DEFAULTS = {
     timeoutMs: 180000,
     maxTurns: 3,
     maxBudgetUsd: 0.5,
-    retries: 2
+    retries: 2,
+    safeMode: true
   },
   categories: [
     { key: 'ai', name: 'AI 与技术', description: 'AI 模型、Agent、开发工具、工程实践、开源项目' },
@@ -33,7 +34,7 @@ const BUILTIN_DEFAULTS = {
   weekly: {
     enabled: true,
     dayOfWeek: 1,
-    hour: 9,
+    hour: 2,
     minute: 0,
     analyzeBatchSize: 20,
     analyzeTextChars: 3000,
@@ -120,7 +121,10 @@ export function loadConfig() {
   config.weekly.analyzeBatchSize = Math.min(50, Math.max(1, Number(config.weekly.analyzeBatchSize) || 20));
   config.weekly.analyzeTextChars = Math.min(20000, Math.max(500, Number(config.weekly.analyzeTextChars) || 3000));
   config.weekly.maxL2Actions = Math.min(50, Math.max(0, Number(config.weekly.maxL2Actions) || 0));
-  config.weekly.maxCategoryChangesRatio = Math.min(1, Math.max(0, Number(config.weekly.maxCategoryChangesRatio) || 0.3));
+  const categoryChangeRatio = Number(config.weekly.maxCategoryChangesRatio);
+  config.weekly.maxCategoryChangesRatio = Number.isFinite(categoryChangeRatio)
+    ? Math.min(1, Math.max(0, categoryChangeRatio))
+    : 0.3;
   config.weekly.minCategoryChanges = Math.min(500, Math.max(0, Number(config.weekly.minCategoryChanges) || 0));
   config.weekly.maxSummariesPerRun = Math.min(100, Math.max(1, Number(config.weekly.maxSummariesPerRun) || 20));
   if (!['save', 'classify', 'full'].includes(config.processing.defaultMode)) {

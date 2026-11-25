@@ -8,10 +8,25 @@ function asString(value) {
   return typeof value === 'string' ? value : '';
 }
 
+const LIMITS = {
+  text: 200000,
+  title: 1000,
+  author: 200,
+  linkText: 500,
+  mediaText: 500,
+  links: 100,
+  media: 50
+};
+
+function cut(value, max) {
+  const text = asString(value);
+  return text.length > max ? text.slice(0, max) : text;
+}
+
 function normalizeAuthor(author) {
   if (!author || typeof author !== 'object') return null;
-  const name = asString(author.name).trim();
-  const handle = asString(author.handle).trim().replace(/^@/, '');
+  const name = cut(author.name, LIMITS.author).trim();
+  const handle = cut(author.handle, LIMITS.author).trim().replace(/^@/, '');
   if (!name && !handle) return null;
   return { name: name || handle, handle };
 }
@@ -21,11 +36,12 @@ function normalizeLinks(links) {
   const out = [];
   const seen = new Set();
   for (const link of links) {
+    if (out.length >= LIMITS.links) break;
     if (!link || typeof link !== 'object') continue;
-    const url = asString(link.url).trim();
+    const url = cut(link.url, 2000).trim();
     if (!isHttpUrl(url) || seen.has(url)) continue;
     seen.add(url);
-    out.push({ url, text: asString(link.text) });
+    out.push({ url, text: cut(link.text, LIMITS.linkText) });
   }
   return out;
 }
@@ -34,16 +50,17 @@ function normalizeMedia(media) {
   if (!Array.isArray(media)) return [];
   const out = [];
   for (const item of media) {
+    if (out.length >= LIMITS.media) break;
     if (!item || typeof item !== 'object') continue;
-    const url = asString(item.url).trim();
-    const previewUrl = asString(item.previewUrl).trim();
+    const url = cut(item.url, 2000).trim();
+    const previewUrl = cut(item.previewUrl, 2000).trim();
     if (!isHttpUrl(url) && !isHttpUrl(previewUrl)) continue;
     out.push({
-      type: asString(item.type) || 'image',
+      type: cut(item.type, 50) || 'image',
       url: isHttpUrl(url) ? url : '',
       previewUrl: isHttpUrl(previewUrl) ? previewUrl : '',
-      alt: asString(item.alt),
-      caption: asString(item.caption)
+      alt: cut(item.alt, LIMITS.mediaText),
+      caption: cut(item.caption, LIMITS.mediaText)
     });
   }
   return out;
@@ -52,14 +69,15 @@ function normalizeMedia(media) {
 function normalizeQuoted(quoted) {
   if (!quoted || typeof quoted !== 'object') return null;
   const content = quoted.content && typeof quoted.content === 'object' ? quoted.content : {};
-  const text = asString(content.text);
-  const url = asString(quoted.url).trim();
+  const text = cut(content.text, LIMITS.text);
+  const rawUrl = cut(quoted.url, 2000).trim();
+  const url = isHttpUrl(rawUrl) ? rawUrl : '';
   if (!text && !url) return null;
   return {
-    id: asString(quoted.id),
+    id: cut(quoted.id, 500),
     url,
     author: normalizeAuthor(quoted.author),
-    publishedAt: asString(quoted.publishedAt) || null,
+    publishedAt: cut(quoted.publishedAt, 100) || null,
     content: { text },
     links: normalizeLinks(quoted.links),
     media: normalizeMedia(quoted.media)
@@ -92,8 +110,9 @@ export function validateCapture(raw) {
   if (!isHttpUrl(sourceUrl)) return fail('invalid_source_url', 'source.url 必须是 http/https 地址');
   const content = raw.content;
   if (!content || typeof content !== 'object') return fail('invalid_content', '缺少 content');
-  const text = asString(content.text);
-  if (!text.trim()) return fail('empty_text', 'content.text 不能为空');
+  const rawText = asString(content.text);
+  if (!rawText.trim()) return fail('empty_text', 'content.text 不能为空');
+  const text = rawText.slice(0, LIMITS.text);
 
   const capture = {
     schema: 'xtr.capture/1',
@@ -105,20 +124,22 @@ export function validateCapture(raw) {
       type: source.type,
       url: sourceUrl,
       author: normalizeAuthor(source.author),
-      publishedAt: asString(source.publishedAt) || null,
-      language: asString(source.language) || null
+      publishedAt: cut(source.publishedAt, 100) || null,
+      language: cut(source.language, 50) || null
     },
     content: {
-      title: content.title === null || content.title === undefined ? null : asString(content.title),
+      title: content.title === null || content.title === undefined
+        ? null
+        : cut(content.title, LIMITS.title),
       text,
-      truncated: Boolean(content.truncated)
+      truncated: Boolean(content.truncated) || rawText.length > LIMITS.text
     },
     links: normalizeLinks(raw.links),
     quoted: normalizeQuoted(raw.quoted),
     media: normalizeMedia(raw.media),
     thread: raw.thread && typeof raw.thread === 'object' ? raw.thread : null,
     client: raw.client && typeof raw.client === 'object'
-      ? { name: asString(raw.client.name), version: asString(raw.client.version) }
+      ? { name: cut(raw.client.name, 100), version: cut(raw.client.version, 100) }
       : { name: '', version: '' }
   };
   return { ok: true, capture };

@@ -7,7 +7,7 @@
 #
 set -euo pipefail
 
-SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 usage() {
   cat <<'USAGE'
@@ -84,13 +84,12 @@ if [ ! -d "$TARGET_PARENT" ]; then
   echo "目标目录的父目录不存在: $TARGET_PARENT" >&2
   exit 1
 fi
-TARGET="$(cd "$TARGET_PARENT" && pwd -P)/$(basename "$TARGET")"
-
 if [ ! -d "$TARGET" ]; then
   echo "目标目录不存在: $TARGET" >&2
   echo "请先创建它；部署脚本不会自动创建目标根目录。" >&2
   exit 1
 fi
+TARGET="$(cd "$TARGET" && pwd -P)"
 
 case "$TARGET/" in
   "$SOURCE_DIR/"*)
@@ -103,7 +102,7 @@ if [ "$TARGET" = "$SOURCE_DIR" ]; then
   exit 1
 fi
 
-if [ ! -f "$SOURCE_DIR/server.js" ] || [ ! -f "$SOURCE_DIR/config.json" ]; then
+if [ ! -f "$SOURCE_DIR/server.js" ] || [ ! -f "$SOURCE_DIR/config.example.json" ]; then
   echo "源码目录不完整: $SOURCE_DIR" >&2
   exit 1
 fi
@@ -148,8 +147,9 @@ if [ ! -f "$CONFIG_FILE" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "[dry-run] 将创建配置: $CONFIG_FILE"
   else
-    cp "$SOURCE_DIR/config.json" "$CONFIG_FILE"
-    echo "已创建配置: $CONFIG_FILE"
+    cp "$SOURCE_DIR/config.example.json" "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+    echo "已创建配置: $CONFIG_FILE（请按需填写 token；不要提交）"
   fi
 else
   echo "保留现有配置: $CONFIG_FILE"
@@ -171,6 +171,7 @@ RSYNC_ARGS=(
   --exclude '.DS_Store'
   --exclude 'data/'
   --exclude 'config.json'
+  --exclude 'config.example.json'
   --exclude 'test/'
   --exclude 'scripts/'
   --exclude 'CLAUDE.md'

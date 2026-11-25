@@ -17,6 +17,7 @@
 - Node.js **>= 22.13**（使用内置 `node:sqlite`）
 - 已安装并登录 Claude Code CLI：`claude --version` 能正常运行
 - 本机端口 `8787` 未被占用（可在 `config.json` 修改）
+- 如需自定义配置，先复制模板：`cp agent/config.example.json agent/config.json`（`config.json` 已被 Git 忽略）
 
 ```bash
 # 在项目根目录
@@ -29,7 +30,7 @@ node agent/server.js
 
 1. 打开扩展设置页 →「超级复制」→ 启用。
 2. Agent 接收地址填 `http://127.0.0.1:8787/ingest`。
-3. 如果 `config.json` 配置了 `token`，在插件里填同一个 Token。
+3. 如果运行配置（`agent/config.json` 或 `KB_CONFIG`）配置了 `token`，在插件里填同一个 Token。
 4. 默认处理方式建议选「整理并分析」；推文「存知识库」旁的箭头可以对**本次复制**临时切换。
 
 > 普通「复制」不会发送任何请求；只有点击「存知识库 / 存全文」或其模式菜单才会投递。
@@ -42,7 +43,7 @@ Agent 通过无头模式调用：
 claude -p --output-format json --json-schema <schema> --model sonnet ...
 ```
 
-`config.json` 默认显式传 `--model sonnet`，避免本机 `~/.claude/settings.json` 里的默认模型不可用。若你使用本地路由或特定模型，可修改：
+运行配置默认显式传 `--model sonnet`，避免本机 `~/.claude/settings.json` 里的默认模型不可用。若你使用本地路由或特定模型，可修改：
 
 ```json
 {
@@ -53,12 +54,13 @@ claude -p --output-format json --json-schema <schema> --model sonnet ...
     "timeoutMs": 180000,
     "maxTurns": 3,
     "maxBudgetUsd": 0.5,
-    "retries": 2
+    "retries": 2,
+    "safeMode": true
   }
 }
 ```
 
-Agent 会禁用 Claude CLI 的工具（Bash、文件读写、Web 访问等），只让模型做结构化判断。输入内容被标记为不可信数据，不执行其中的指令。
+Agent 会禁用 Claude CLI 的工具（Bash、文件读写、Web 访问等），只让模型做结构化判断。默认还会加 `--tools ""`、`--strict-mcp-config` 和 `--safe-mode`，避免本机 MCP、插件或 hooks 被不可信内容触发；如果你的本地路由依赖 Claude Code 的自定义设置，可以把 `llm.safeMode` 设为 `false`。输入内容被标记为不可信数据，不执行其中的指令。
 
 ---
 
@@ -71,7 +73,7 @@ Agent 会禁用 Claude CLI 的工具（Bash、文件读写、Web 访问等），
 | `full` | 异步生成标题、分类、标签、摘要、要点 | `ready` |
 | 每周整理 | 对**所有**条目重新分析，刷新摘要、分类和分类总结 | `ready` |
 
-- 模式由插件在发送时决定；缺失时使用 `config.json` 的 `processing.defaultMode`（默认 `full`）。
+- 模式由插件在发送时决定；缺失时使用运行配置的 `processing.defaultMode`（默认 `full`）。
 - 同一 `id` 再次投递时，如果新模式更完整，会升级处理。例如先 `save`，之后又用 `full` 发送同一推文，会重新分析。
 - Agent 的 `POST /ingest` 始终快速返回 `202`；模型分析在后台队列执行。
 
@@ -86,7 +88,7 @@ Agent 会禁用 Claude CLI 的工具（Bash、文件读写、Web 访问等），
   - 手动移动分类；
   - 添加、编辑、删除「我的想法」；
   - 立即「完整分析」或「仅整理分类」；
-  - 删除/恢复（软删除，进入回收站）。
+  - 删除/恢复（软删除，进入回收站）；条目正在整理时会提示「正在整理，请勿删除」，删除确认也会再次提醒。
 - **每周报告**：查看历史周报、分类变化、手动分类被覆盖的条目、一级分类提案；可以取消/恢复任务或回滚本次分类调整。
 - **分类总结**：每次全量整理后按一级分类生成，可导出 Markdown。
 - **分类管理**：新建一级/二级分类、改名、归档。一级分类也可以手动维护。
@@ -98,7 +100,7 @@ Agent 会禁用 Claude CLI 的工具（Bash、文件读写、Web 访问等），
 
 ## 每周全量整理
 
-默认每周一 09:00（本机时区）执行；服务不在线时会在一周内补跑；同一 ISO 周已有任务时跳过。也可以在 UI 或 CLI 手动触发。
+默认每周一 02:00（本机时区，夜间低打扰时段）执行；服务不在线时会在一周内补跑；同一 ISO 周已有任务时跳过。也可以在 UI 或 CLI 手动触发。插件默认「整理并分析」会在收到内容后立即入队；如果不想在白天占用机器，可以把插件默认处理方式改成「只保存原文」，让周整理在夜间统一分析。
 
 阶段：
 
@@ -122,7 +124,7 @@ Agent 会禁用 Claude CLI 的工具（Bash、文件读写、Web 访问等），
 | --- | --- | --- |
 | `enabled` | `true` | 是否启用自动周任务 |
 | `dayOfWeek` | `1` | 1=周一 … 7=周日 |
-| `hour` / `minute` | `9` / `0` | 本机时间 |
+| `hour` / `minute` | `2` / `0` | 本机时间；建议放在夜间 |
 | `analyzeBatchSize` | `20` | 每批分析条数 |
 | `analyzeTextChars` | `3000` | 每条送入模型的正文上限 |
 | `maxL2Actions` | `8` | 每次最多执行的二级分类调整 |
@@ -205,6 +207,7 @@ agent/data/
   kb.sqlite              # 条目、分类、笔记、任务、事件、提案、总结
   captures/<date>/*.json # 原始 capture，先落盘再分析
   library/<一级>/<二级>/*.md
+  library/_summaries/<分类 key>.md
   reports/<week>.md
 ```
 
@@ -239,8 +242,8 @@ scripts/deploy.sh --target /Users/programs/x-knowledge
 
 脚本会先跑 Agent 测试，然后：
 
-- 将代码同步到 `app/`，排除 `data/`、`config.json`、`test/`、`scripts/`；
-- 首次部署时从 `config.json` 创建运行配置，之后不覆盖；
+- 将代码同步到 `app/`，排除 `data/`、`config.json`、`config.example.json`、`test/`、`scripts/`；
+- 首次部署时从 `config.example.json` 创建运行配置并设为 `0600`，之后不覆盖；
 - 同步前把旧代码备份到 `backups/`；
 - 不触碰 `data/`，升级代码不会影响知识库。
 
@@ -260,7 +263,7 @@ node /Users/programs/x-knowledge/app/server.js
 
 ## 配置
 
-默认读取 `agent/config.json`，也支持环境变量覆盖：
+默认读取 `agent/config.json`（本地文件，已被 Git 忽略；没有时使用内置默认值），也支持环境变量覆盖。模板见 `agent/config.example.json`：
 
 | 环境变量 | 说明 |
 | --- | --- |
@@ -273,7 +276,7 @@ node /Users/programs/x-knowledge/app/server.js
 | `KB_LLM_MODEL` | 模型，默认 `sonnet` |
 | `KB_WEEKLY_ENABLED` | `1/0` 覆盖自动周任务开关 |
 
-`config.json` 里的 `categories` 是首次启动时写入的一级分类种子；之后以数据库为准，修改配置不会覆盖已存在的分类。
+`config.json` 不进入 Git；其中的 `categories` 是首次启动时写入的一级分类种子；之后以数据库为准，修改配置不会覆盖已存在的分类。
 
 ---
 
@@ -281,8 +284,9 @@ node /Users/programs/x-knowledge/app/server.js
 
 - 默认只监听 `127.0.0.1`；监听非回环地址必须设置 `token`，否则服务拒绝启动。
 - 插件内容按不可信数据处理：不执行正文指令、不自动访问正文链接、不把正文当系统提示词。
-- 模型通过 Claude CLI 无头模式运行，禁用了 Bash、文件、Web 等工具。
-- API 不发送 CORS 头；Web UI 与 API 同源。
+- 模型通过 Claude CLI 无头模式运行，显式清空内置工具、忽略 MCP 配置，并默认使用 safe mode；不要让模型获得 Bash、文件、浏览器等工具。
+- Token 建议只通过环境变量或本地 `config.json` 提供；`agent/config.json` 已被 Git 忽略，部署脚本创建运行配置时会设为 `0600`。不要把 token 写进提交、命令行历史或截图。
+- API 不发送 CORS 头；Web UI 与 API 同源；所有 `/api/*` 写操作要求 `application/json`，避免普通表单跨站触发。
 - Markdown 渲染会转义 HTML，链接只允许 `http/https`。
 - 日志不记录请求正文和 Token。
 
@@ -315,11 +319,11 @@ Agent 测试使用临时数据目录和 mock Claude 响应，不会调用真实�
 
 **插件显示 401**
 
-`config.json` 配置了 `token`，插件设置里的 Token 必须一致。Web UI 也需要在「设置」里填写同一个 Token。
+`config.json` 或 `KB_TOKEN` 配置了 `token`，插件设置里的 Token 必须一致。Web UI 也需要在「设置」里填写同一个 Token。
 
 **周任务没有自动运行**
 
-确认 `weekly.enabled=true`、服务在周一 09:00 之后运行过、且本周还没有任何周任务。自动任务在同一 ISO 周只跑一次；手动任务不受限制。
+确认 `weekly.enabled=true`、服务在周一 02:00 之后运行过、且本周还没有任何周任务。自动任务在同一 ISO 周只跑一次；手动任务不受限制。
 
 **手动改了分类，周任务又改回去了？**
 
