@@ -35,6 +35,7 @@
     superCopyEnabled: $('superCopyEnabled'),
     superCopyEndpoint: $('superCopyEndpoint'),
     superCopyToken: $('superCopyToken'),
+    superCopyMode: $('superCopyMode'),
     superCopyIncludeQuoted: $('superCopyIncludeQuoted'),
     superCopyIncludeMedia: $('superCopyIncludeMedia'),
     testSuperCopy: $('testSuperCopy'),
@@ -116,6 +117,7 @@
     els.superCopyEnabled.checked = !!next.superCopy.enabled;
     els.superCopyEndpoint.value = next.superCopy.endpoint;
     els.superCopyToken.value = next.superCopy.token;
+    els.superCopyMode.value = next.superCopy.mode || 'full';
     els.superCopyIncludeQuoted.checked = !!next.superCopy.includeQuoted;
     els.superCopyIncludeMedia.checked = !!next.superCopy.includeMedia;
     const radio = document.querySelector(`input[name="provider"][value="${next.provider}"]`);
@@ -154,6 +156,7 @@
         enabled: els.superCopyEnabled.checked,
         endpoint: els.superCopyEndpoint.value,
         token: els.superCopyToken.value,
+        mode: els.superCopyMode.value,
         includeQuoted: els.superCopyIncludeQuoted.checked,
         includeMedia: els.superCopyIncludeMedia.checked
       }

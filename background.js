@@ -424,6 +424,13 @@ function normalizeCapture(raw) {
     capture.content.text = capture.content.text.slice(0, MAX_CAPTURE_TEXT);
     capture.content.truncated = true;
   }
+  if (capture.processingMode !== undefined
+    && capture.processingMode !== null
+    && capture.processingMode !== 'save'
+    && capture.processingMode !== 'classify'
+    && capture.processingMode !== 'full') {
+    return { error: 'capture.processingMode 必须是 save、classify 或 full' };
+  }
   if (Array.isArray(capture.links)) capture.links = capture.links.slice(0, MAX_CAPTURE_LINKS);
   if (Array.isArray(capture.media)) capture.media = capture.media.slice(0, MAX_CAPTURE_MEDIA);
   if (capture.quoted && capture.quoted.content && typeof capture.quoted.content.text === 'string'

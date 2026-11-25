@@ -39,6 +39,11 @@
   const PAGE_CACHE_LIMIT = 600;
   const REMOTE_TIMEOUT_MS = 190000;
   const LOCAL_TIMEOUT_MS = 240000;
+  const SUPER_MODE_OPTIONS = [
+    { mode: 'save', label: '仅保存原文', desc: '先存下来，之后再整理' },
+    { mode: 'classify', label: '整理分类', desc: '生成标题、分类和标签' },
+    { mode: 'full', label: '整理并分析', desc: '生成摘要、要点和标签' }
+  ];
 
   let settings = shared.mergeSettings(null);
   let readyResolve;
@@ -53,6 +58,9 @@
   let articleCopyButtons = new WeakMap();
   let tweetSuperButtons = new WeakMap();
   let articleSuperButtons = new WeakMap();
+  let tweetSuperMenuButtons = new WeakMap();
+  let articleSuperMenuButtons = new WeakMap();
+  let activeSuperMenu = null;
   let intersection = null;
   let mutationObserver = null;
   let scanTimer = null;
@@ -700,7 +708,13 @@
     };
   }
 
-  function captureTweet(article) {
+  function normalizeSuperMode(mode) {
+    if (shared.SUPER_COPY_MODES.includes(mode)) return mode;
+    if (shared.SUPER_COPY_MODES.includes(settings.superCopy.mode)) return settings.superCopy.mode;
+    return 'full';
+  }
+
+  function captureTweet(article, mode) {
     const node = mainTweetTextNode(article);
     if (!node) return null;
     const text = textForCopy(node);
@@ -723,6 +737,7 @@
       quoted: captureQuoted(article),
       media: settings.superCopy.includeMedia ? collectMedia(article, article) : [],
       thread: null,
+      processingMode: normalizeSuperMode(mode),
       client: {
         name: 'x-translate-plugin',
         version: chrome.runtime.getManifest().version
@@ -730,7 +745,7 @@
     };
   }
 
-  function captureArticle() {
+  function captureArticle(mode) {
     const root = articleRoot();
     const body = articleBodyRoot();
     if (!root || !body) return null;
@@ -756,6 +771,7 @@
       quoted: null,
       media: settings.superCopy.includeMedia ? collectMedia(body) : [],
       thread: null,
+      processingMode: normalizeSuperMode(mode),
       client: {
         name: 'x-translate-plugin',
         version: chrome.runtime.getManifest().version
@@ -835,12 +851,12 @@
     });
   }
 
-  function superCopyTweetArticle(article) {
-    runSuperCopy(captureTweet(article), '推文');
+  function superCopyTweetArticle(article, mode) {
+    runSuperCopy(captureTweet(article, mode), '推文');
   }
 
-  function superCopyArticle() {
-    runSuperCopy(captureArticle(), '文章');
+  function superCopyArticle(mode) {
+    runSuperCopy(captureArticle(mode), '文章');
   }
 
   async function copyTweetArticle(article) {
@@ -874,6 +890,132 @@
     return button;
   }
 
+  function createSuperMenuButton(kind, action) {
+    const isArticle = kind === 'article';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = isArticle
+      ? 'xtr-article-copy xtr-article-super-menu'
+      : 'xtr-copy-btn xtr-super-menu';
+    button.setAttribute('data-xtr-copy', isArticle ? 'super-article-menu' : 'super-tweet-menu');
+    button.setAttribute('aria-haspopup', 'menu');
+    button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('aria-label', isArticle ? '选择文章处理方式' : '选择推文处理方式');
+    button.title = isArticle ? '选择文章处理方式' : '选择推文处理方式';
+    button.textContent = '▾';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (activeSuperMenu && activeSuperMenu.anchor === button) {
+        closeSuperModeMenu();
+      } else {
+        openSuperModeMenu(button, isArticle ? '文章' : '推文', action);
+      }
+    });
+    return button;
+  }
+
+  function closeSuperModeMenu() {
+    if (!activeSuperMenu) return;
+    const { menu, anchor, cleanup } = activeSuperMenu;
+    activeSuperMenu = null;
+    cleanup();
+    anchor.setAttribute('aria-expanded', 'false');
+    menu.remove();
+  }
+
+  function isDarkSurface() {
+    try {
+      const match = getComputedStyle(document.body).backgroundColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (!match) return false;
+      const luminance = 0.2126 * Number(match[1]) + 0.7152 * Number(match[2]) + 0.0722 * Number(match[3]);
+      return luminance < 110;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function openSuperModeMenu(anchor, label, onPick) {
+    closeSuperModeMenu();
+    const menu = document.createElement('div');
+    menu.className = 'xtr-mode-menu' + (isDarkSurface() ? ' xtr-mode-dark' : '');
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', label + '处理方式');
+
+    const head = document.createElement('div');
+    head.className = 'xtr-mode-head';
+    head.textContent = '本次发送';
+    menu.appendChild(head);
+
+    for (const option of SUPER_MODE_OPTIONS) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'xtr-mode-item';
+      item.setAttribute('role', 'menuitem');
+      const title = document.createElement('span');
+      title.className = 'xtr-mode-title';
+      title.textContent = option.label;
+      if (option.mode === normalizeSuperMode(undefined)) {
+        const mark = document.createElement('span');
+        mark.className = 'xtr-mode-default';
+        mark.textContent = '默认';
+        title.appendChild(mark);
+      }
+      const desc = document.createElement('span');
+      desc.className = 'xtr-mode-desc';
+      desc.textContent = option.desc;
+      item.append(title, desc);
+      item.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeSuperModeMenu();
+        onPick(option.mode);
+      });
+      menu.appendChild(item);
+    }
+
+    menu.style.visibility = 'hidden';
+    menu.style.pointerEvents = 'none';
+    document.body.appendChild(menu);
+    const rect = anchor.getBoundingClientRect();
+    const margin = 8;
+    let top = rect.bottom + 6;
+    if (top + menu.offsetHeight > window.innerHeight - margin) {
+      top = Math.max(margin, rect.top - menu.offsetHeight - 6);
+    }
+    const left = Math.min(
+      Math.max(margin, rect.right - menu.offsetWidth),
+      window.innerWidth - menu.offsetWidth - margin
+    );
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+    menu.style.visibility = 'visible';
+    menu.style.pointerEvents = 'auto';
+    anchor.setAttribute('aria-expanded', 'true');
+
+    const onDocClick = (event) => {
+      if (!menu.contains(event.target) && event.target !== anchor) closeSuperModeMenu();
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') closeSuperModeMenu();
+    };
+    const onViewport = () => closeSuperModeMenu();
+    document.addEventListener('click', onDocClick);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onViewport);
+    window.addEventListener('scroll', onViewport, true);
+    activeSuperMenu = {
+      anchor,
+      menu,
+      cleanup: () => {
+        document.removeEventListener('click', onDocClick);
+        document.removeEventListener('keydown', onKey);
+        window.removeEventListener('resize', onViewport);
+        window.removeEventListener('scroll', onViewport, true);
+      }
+    };
+  }
+
   function insertCopyButtonAfter(node, button) {
     const parent = node.parentElement;
     if (!parent) return false;
@@ -901,10 +1043,21 @@
         if (articleButton) {
           let articleSuper = articleSuperButtons.get(articleTitle);
           if (!articleSuper || !articleSuper.isConnected) {
-            articleSuper = createCopyButton('super-article', superCopyArticle);
+            articleSuper = createCopyButton('super-article', () => superCopyArticle());
             articleSuperButtons.set(articleTitle, articleSuper);
             if (!insertCopyButtonAfter(articleButton, articleSuper)) {
               articleSuperButtons.delete(articleTitle);
+              articleSuper = null;
+            }
+          }
+          if (articleSuper) {
+            let articleMenu = articleSuperMenuButtons.get(articleTitle);
+            if (!articleMenu || !articleMenu.isConnected) {
+              articleMenu = createSuperMenuButton('article', (mode) => superCopyArticle(mode));
+              articleSuperMenuButtons.set(articleTitle, articleMenu);
+              if (!insertCopyButtonAfter(articleSuper, articleMenu)) {
+                articleSuperMenuButtons.delete(articleTitle);
+              }
             }
           }
         }
@@ -929,18 +1082,30 @@
         superButton = createCopyButton('super-tweet', () => superCopyTweetArticle(article));
         tweetSuperButtons.set(article, superButton);
       }
+      let superMenuButton = tweetSuperMenuButtons.get(article);
+      if (!superMenuButton || !superMenuButton.isConnected) {
+        superMenuButton = createSuperMenuButton('tweet', (mode) => superCopyTweetArticle(article, mode));
+        tweetSuperMenuButtons.set(article, superMenuButton);
+      }
 
       if (group) {
         if (!group.contains(copyButton)) group.appendChild(copyButton);
         if (!group.contains(superButton)) group.appendChild(superButton);
+        if (!group.contains(superMenuButton)) group.appendChild(superMenuButton);
       } else {
         if (!copyButton.isConnected && !insertCopyButtonAfter(textNode, copyButton)) {
           tweetCopyButtons.delete(article);
           tweetSuperButtons.delete(article);
+          tweetSuperMenuButtons.delete(article);
           continue;
         }
         if (!superButton.isConnected && !insertCopyButtonAfter(copyButton, superButton)) {
           tweetSuperButtons.delete(article);
+          tweetSuperMenuButtons.delete(article);
+          continue;
+        }
+        if (!superMenuButton.isConnected && !insertCopyButtonAfter(superButton, superMenuButton)) {
+          tweetSuperMenuButtons.delete(article);
         }
       }
     }
@@ -1741,13 +1906,11 @@
 
   function onClickCapture(event) {
     const copyEl = event.target.closest && event.target.closest('[data-xtr-copy]');
-    if (copyEl) {
+    const copyAction = copyEl && copyActions.get(copyEl);
+    if (copyAction) {
       event.preventDefault();
       event.stopPropagation();
-      const action = copyActions.get(copyEl);
-      if (action) {
-        try { action(); } catch (_) { /* ignore */ }
-      }
+      try { copyAction(); } catch (_) { /* ignore */ }
       return;
     }
     const actionEl = event.target.closest && event.target.closest('[data-xtr-action]');

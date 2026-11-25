@@ -403,6 +403,7 @@ async function main() {
         enabled: true,
         endpoint: 'http://127.0.0.1:' + port + '/ingest',
         token: 'test-token',
+        mode: 'full',
         includeQuoted: true,
         includeMedia: true
       }
@@ -418,6 +419,7 @@ async function main() {
     assert.equal(await optionsPage.$$eval('input[name="provider"]', (els) => els.length), 6);
     assert.ok(await optionsPage.$$eval('#targetLang option', (els) => els.length) >= 20);
     assert.equal(await optionsPage.$eval('#targetLang', (el) => el.value), 'zh-CN');
+    assert.equal(await optionsPage.$eval('#superCopyMode', (el) => el.value), 'full');
 
     // The LLM panel can list models from the configured /v1/models endpoint.
     await optionsPage.click('#loadModels');
@@ -709,7 +711,23 @@ async function main() {
     assert.equal(tweetCapture.media[0].url, 'https://pbs.twimg.com/media/abc123?format=jpg&name=large');
     assert.equal(tweetCapture.media[0].alt, '一张图表');
     assert.equal(tweetCapture.thread, null);
+    assert.equal(tweetCapture.processingMode, 'full');
     console.log('✓ 推文超级复制发送正文、链接、引用推文和图片');
+
+    // The caret next to the super-copy button lets the user choose a different
+    // processing mode for this copy only.
+    await copyPage.click('#copy-actions .xtr-super-menu');
+    await copyPage.waitForSelector('.xtr-mode-menu', { timeout: 5000 });
+    await copyPage.evaluate(() => {
+      const item = Array.from(document.querySelectorAll('.xtr-mode-item'))
+        .find((node) => node.textContent.includes('仅保存原文'));
+      if (item) item.click();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await copyPage.waitForFunction(() => !document.querySelector('.xtr-mode-menu'), { timeout: 2000 });
+    assert.equal(ingestRequests.length, 2);
+    assert.equal(ingestRequests[1].body.processingMode, 'save');
+    console.log('✓ 超级复制菜单可为本次复制选择仅保存');
     await copyPage.close();
 
     const copyArticlePage = await browser.newPage();
@@ -746,8 +764,8 @@ async function main() {
       await copyArticlePage.evaluate(() => navigator.clipboard.readText()),
       '如何构建知识工厂\n\n' + articleBodyText + '\n\n' + copyOrigin + '/copy-article'
     );
-    assert.equal(ingestRequests.length, 2);
-    const articleCapture = ingestRequests[1].body;
+    assert.equal(ingestRequests.length, 3);
+    const articleCapture = ingestRequests[2].body;
     assert.equal(articleCapture.source.type, 'article');
     assert.equal(articleCapture.source.url, copyOrigin + '/copy-article');
     assert.equal(articleCapture.source.author.handle, 'alice');
@@ -760,7 +778,19 @@ async function main() {
     assert.equal(articleCapture.media[0].url, 'https://pbs.twimg.com/media/def456?format=jpg&name=large');
     assert.equal(articleCapture.media[0].alt, '架构图');
     assert.equal(articleCapture.media[0].caption, '图片说明');
-    console.log('✓ 文章超级复制发送标题、正文、链接和图片');
+    assert.equal(articleCapture.processingMode, 'full');
+    await copyArticlePage.click('[data-testid="twitter-article-title"] ~ .xtr-article-super-menu');
+    await copyArticlePage.waitForSelector('.xtr-mode-menu', { timeout: 5000 });
+    await copyArticlePage.evaluate(() => {
+      const item = Array.from(document.querySelectorAll('.xtr-mode-item'))
+        .find((node) => node.textContent.includes('整理分类'));
+      if (item) item.click();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await copyArticlePage.waitForFunction(() => !document.querySelector('.xtr-mode-menu'), { timeout: 2000 });
+    assert.equal(ingestRequests.length, 4);
+    assert.equal(ingestRequests[3].body.processingMode, 'classify');
+    console.log('✓ 文章超级复制菜单可为本次复制选择整理分类');
     await copyArticlePage.close();
 
     assert.ok(requests.length > 0, '应该至少请求过一次大模型接口');

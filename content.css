@@ -310,3 +310,124 @@ html.xtr-disabled .xtr-chip {
     max-width: none;
   }
 }
+
+/* Super copy processing-mode menu */
+.xtr-copy-btn.xtr-super-menu {
+  margin-left: -4px;
+  padding: 5px 5px;
+  color: rgb(29, 155, 240);
+  font-size: 11px;
+  opacity: 0;
+}
+
+article:hover .xtr-copy-btn.xtr-super-menu,
+.xtr-copy-btn.xtr-super-menu:focus-visible {
+  opacity: 1;
+}
+
+.xtr-article-copy.xtr-article-super-menu {
+  margin-left: 2px;
+  padding: 5px 8px;
+  border-color: transparent;
+  color: rgb(29, 155, 240);
+}
+
+.xtr-article-copy.xtr-article-super-menu:hover,
+.xtr-article-copy.xtr-article-super-menu:focus-visible {
+  border-color: rgba(29, 155, 240, 0.45);
+  background: rgba(29, 155, 240, 0.12);
+}
+
+html.xtr-no-supercopy .xtr-super-menu,
+html.xtr-no-supercopy .xtr-article-super-menu {
+  display: none !important;
+}
+
+.xtr-mode-menu {
+  position: fixed;
+  z-index: 2147483647;
+  width: 214px;
+  padding: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 13px;
+  background: rgb(255, 255, 255);
+  color: rgb(15, 20, 25);
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.2);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  text-align: left;
+}
+
+.xtr-mode-menu.xtr-mode-dark {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgb(22, 24, 28);
+  color: rgb(231, 233, 234);
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.55);
+}
+
+.xtr-mode-head {
+  padding: 4px 8px 6px;
+  color: rgb(83, 100, 113);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.xtr-mode-dark .xtr-mode-head {
+  color: rgb(139, 152, 165);
+}
+
+.xtr-mode-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.xtr-mode-item:hover,
+.xtr-mode-item:focus-visible {
+  outline: none;
+  background: rgba(29, 155, 240, 0.12);
+}
+
+.xtr-mode-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgb(15, 20, 25);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.xtr-mode-dark .xtr-mode-title {
+  color: rgb(231, 233, 234);
+}
+
+.xtr-mode-default {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(29, 155, 240, 0.14);
+  color: rgb(29, 155, 240);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.xtr-mode-desc {
+  color: rgb(83, 100, 113);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.xtr-mode-dark .xtr-mode-desc {
+  color: rgb(139, 152, 165);
+}

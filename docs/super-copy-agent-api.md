@@ -7,6 +7,9 @@
 - 健康检查：`GET /health`
 - 传输：HTTP/HTTPS + JSON（UTF-8）
 - 认证：可选 `Authorization: Bearer <token>`
+- 处理模式：可选 `processingMode`（本规范 0.4 起）
+
+> 兼容性：`processingMode` 是可选扩展字段。旧接收端可以忽略它，按自己的默认策略处理；新接收端应在缺失时使用本地默认值。
 
 ---
 
@@ -32,7 +35,7 @@
 | `Content-Type` | 是 | `application/json; charset=utf-8` |
 | `Authorization` | 否 | 配置了 Token 时为 `Bearer <token>` |
 | `Idempotency-Key` | 否 | 扩展会填为 capture 的 `id`，接收端可用它做幂等 |
-| `X-XTR-Client` | 否 | 例如 `x-translate-plugin/0.3.0`，仅用于日志 |
+| `X-XTR-Client` | 否 | 例如 `x-translate-plugin/0.4.0`，仅用于日志 |
 
 请求体上限建议 **2 MB**；超过返回 `413`。扩展会把超长正文截断并标记 `content.truncated: true`。
 
@@ -68,9 +71,10 @@
   "quoted": null,
   "media": [],
   "thread": null,
+  "processingMode": "full",
   "client": {
     "name": "x-translate-plugin",
-    "version": "0.3.0"
+    "version": "0.4.0"
   }
 }
 ```
@@ -96,6 +100,7 @@
 | `quoted` | object/null | 否 | 引用推文；没有则为 `null` |
 | `media` | array | 是 | 图片等媒体；可能为空数组 |
 | `thread` | object/null | 否 | 预留：整串 thread；当前扩展发送 `null` |
+| `processingMode` | string | 否 | 本次超级复制的处理方式：`save` / `classify` / `full`；缺失时由接收端决定 |
 | `client.name` | string | 是 | 固定 `x-translate-plugin` |
 | `client.version` | string | 是 | 扩展版本 |
 
@@ -193,9 +198,27 @@
     }
   ],
   "thread": null,
-  "client": { "name": "x-translate-plugin", "version": "0.3.0" }
+  "processingMode": "classify",
+  "client": { "name": "x-translate-plugin", "version": "0.4.0" }
 }
 ```
+
+### 2.4 `processingMode` 处理方式
+
+扩展的超级复制主按钮使用设置页里的「默认处理方式」；按钮旁的箭头允许用户对**本次复制**临时切换，普通复制永远不会发送请求。
+
+| 值 | 含义 | 接收端行为建议 |
+| --- | --- | --- |
+| `save` | 仅保存原文 | 尽快落盘，返回 `202` / `status: "saved"`；不调用大模型 |
+| `classify` | 只整理分类 | 落盘后异步生成标题、分类、标签；暂不生成摘要/要点 |
+| `full` | 整理并分析 | 落盘后异步生成标题、分类、标签、摘要和要点 |
+
+接收端处理建议：
+
+1. `processingMode` 缺失或无法识别时，使用接收端自己的默认模式；不要因此拒绝请求。
+2. 同一 `id` 再次投递时，如果新模式比已存内容更完整，可以升级处理（例如 `save` → `classify`），并返回 `status: "queued"`；否则返回 `duplicate`。
+3. 定时全量整理可以重新分析 `save` / `classify` 的内容；接收端应在周报或状态中说明哪些内容尚未分析。
+4. `processingMode` 只影响本次处理深度，不改变 `id`、原文和分类体系。
 
 ---
 
@@ -220,10 +243,11 @@
 | --- | --- | --- | --- |
 | `ok` | boolean | 是 | 成功为 `true` |
 | `id` | string | 否 | 原样返回 capture 的 `id` |
-| `status` | string | 否 | `accepted` / `queued` / `processed` / `duplicate` |
+| `status` | string | 否 | `accepted` / `queued` / `processed` / `saved` / `classified` / `duplicate` |
 | `category` | string | 否 | 分类结果；没有分析结果时省略 |
 | `tags` | string[] | 否 | 标签；没有时省略 |
 | `message` | string | 否 | 展示给用户的简短消息 |
+| `processingMode` | string | 否 | 接收端实际采用的模式，便于扩展确认 |
 
 扩展会把 `category` / `message` 拼到 toast 里；没有也能正常工作。
 
@@ -298,7 +322,7 @@
 - **定时分析**：先落盘，由 cron / launchd / 任务队列定期批量整理。
 - **混合**：轻量分类立即做，深度摘要/向量化定时做。
 
-扩展不关心具体方式，只要求接口快速返回；`status` 可以是 `queued` / `processed`。
+扩展不关心具体方式，只要求接口快速返回；`status` 可以是 `queued` / `processed`。如果接收端支持 `processingMode`，应优先按请求里的模式处理；`save` 模式不应触发大模型调用。
 
 ### 5.3 分类与知识库（建议）
 

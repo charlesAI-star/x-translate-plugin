@@ -1,0 +1,72 @@
+{
+  "port": 8787,
+  "host": "127.0.0.1",
+  "token": "",
+  "serviceName": "x-knowledge-agent",
+  "llm": {
+    "provider": "claude-cli",
+    "command": "claude",
+    "model": "sonnet",
+    "timeoutMs": 180000,
+    "maxTurns": 3,
+    "maxBudgetUsd": 0.5,
+    "retries": 2
+  },
+  "categories": [
+    {
+      "key": "ai",
+      "name": "AI 与技术",
+      "description": "AI 模型、Agent、开发工具、工程实践、开源项目"
+    },
+    {
+      "key": "product",
+      "name": "产品与设计",
+      "description": "产品思维、用户体验、交互设计、增长、需求判断"
+    },
+    {
+      "key": "business",
+      "name": "商业与投资",
+      "description": "商业模式、创业、投资、市场、经济与行业分析"
+    },
+    {
+      "key": "writing",
+      "name": "写作与表达",
+      "description": "写作方法、内容创作、演讲、沟通与叙事"
+    },
+    {
+      "key": "learning",
+      "name": "学习与思维",
+      "description": "学习方法、认知科学、思维模型、决策与问题解决"
+    },
+    {
+      "key": "life",
+      "name": "生活与健康",
+      "description": "健康、习惯、生活方式、心理与个人成长"
+    },
+    {
+      "key": "society",
+      "name": "社会与观点",
+      "description": "社会议题、文化、历史、政策与公共讨论"
+    },
+    {
+      "key": "inbox",
+      "name": "待归类",
+      "description": "暂时无法确定分类的内容"
+    }
+  ],
+  "weekly": {
+    "enabled": true,
+    "dayOfWeek": 1,
+    "hour": 9,
+    "minute": 0,
+    "analyzeBatchSize": 20,
+    "analyzeTextChars": 3000,
+    "maxL2Actions": 8,
+    "maxCategoryChangesRatio": 0.3,
+    "minCategoryChanges": 15,
+    "maxSummariesPerRun": 20
+  },
+  "processing": {
+    "defaultMode": "full"
+  }
+}
