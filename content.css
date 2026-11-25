@@ -161,6 +161,16 @@ article:hover .xtr-copy-btn,
   background: rgba(29, 155, 240, 0.1);
 }
 
+.xtr-copy-btn.xtr-super {
+  color: rgb(29, 155, 240);
+  opacity: 0;
+}
+
+article:hover .xtr-copy-btn.xtr-super,
+.xtr-copy-btn.xtr-super:focus-visible {
+  opacity: 1;
+}
+
 .xtr-copy-btn:focus-visible {
   outline: 1px solid rgb(29, 155, 240);
   outline-offset: 1px;
@@ -194,6 +204,16 @@ article:hover .xtr-copy-btn,
 .xtr-article-copy:focus-visible {
   outline: 1px solid rgb(29, 155, 240);
   outline-offset: 2px;
+}
+
+.xtr-article-copy.xtr-article-super {
+  margin-left: 8px;
+  color: rgb(29, 155, 240);
+}
+
+html.xtr-no-supercopy .xtr-super,
+html.xtr-no-supercopy .xtr-article-super {
+  display: none !important;
 }
 
 html.xtr-hide-provider .xtr-block .xtr-provider,

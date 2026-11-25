@@ -259,6 +259,10 @@ body {
   gap: 14px;
 }
 
+.super-copy-fields {
+  margin-top: 14px;
+}
+
 .field {
   display: flex;
   flex-direction: column;

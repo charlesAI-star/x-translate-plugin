@@ -88,14 +88,21 @@ function draftArticleHtml() {
 function copyTweetHtml() {
   return '<!doctype html><html><head><meta charset="utf-8"><title>copy tweet</title></head><body>'
     + '<article data-testid="tweet" id="copy-tweet">'
+    + '<div data-testid="User-Name"><a href="/alice"><span>Alice</span></a>'
+    + '<a href="/alice"><span>@alice</span></a></div>'
+    + '<a href="/alice/status/789"><time datetime="2026-11-24T18:00:00.000Z">Nov 24</time></a>'
     + '<div data-testid="tweetText" lang="zh">第一行<img alt="😀"><br>第二行<br>看这个：'
     + '<a href="https://t.co/abc123" title="https://example.com/full/path?x=1">example.com/full/pa…</a>'
     + '<div data-testid="tweet-text-show-more-link">显示更多</div>'
     + '</div>'
+    + '<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/abc123?format=jpg&name=small" alt="一张图表"></div>'
     + '<div role="group" id="copy-actions"><button type="button" data-testid="reply">回复</button>'
     + '<button type="button" data-testid="like">喜欢</button></div>'
     + '<div role="link"><article data-testid="tweet" id="quoted-tweet">'
+    + '<div data-testid="User-Name"><a href="/bob"><span>Bob</span></a></div>'
+    + '<a href="/bob/status/654"><time datetime="2026-11-24T17:00:00.000Z">Nov 24</time></a>'
     + '<div data-testid="tweetText" lang="en">Quoted text should not be copied.</div>'
+    + '<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/quotedimg?format=png&name=small" alt="引用图"></div>'
     + '<div role="group"><button type="button" data-testid="like">like</button></div>'
     + '</article></div>'
     + '</article></body></html>';
@@ -104,6 +111,7 @@ function copyTweetHtml() {
 function copyArticleHtml() {
   return '<!doctype html><html><head><meta charset="utf-8"><title>copy article</title></head><body>'
     + '<article data-testid="tweet"><article data-testid="twitterArticleReadView">'
+    + '<div data-testid="User-Name"><a href="/alice"><span>Alice</span></a></div>'
     + '<div data-testid="twitter-article-title"><span id="copy-article-title">如何构建知识工厂</span></div>'
     + '<div data-testid="twitterArticleRichTextView"><div>'
     + '<div class="longform-unstyled"><div class="public-DraftStyleDefault-block"><span>第一段。</span></div></div>'
@@ -112,7 +120,8 @@ function copyArticleHtml() {
     + '<a href="https://t.co/xyz789" title="https://example.com/a/b?c=1">example.com/a/b…</a>。</span></div></div>'
     + '<ul><li class="longform-unordered-list-item">列表项一</li>'
     + '<li class="longform-unordered-list-item">列表项二</li></ul>'
-    + '<figure><figcaption>图片说明</figcaption></figure>'
+    + '<figure><img src="https://pbs.twimg.com/media/def456?format=jpg&name=small" alt="架构图">'
+    + '<figcaption>图片说明</figcaption></figure>'
     + '</div></div></article></article></body></html>';
 }
 
@@ -175,12 +184,55 @@ function copyExtension(tmpRoot) {
 
 function startServer() {
   const requests = [];
+  const ingestRequests = [];
+  const healthChecks = [];
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://' + (req.headers.host || '127.0.0.1'));
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/fixture.html')) {
       const html = fs.readFileSync(FIXTURE, 'utf8');
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
+      return;
+    }
+    if (req.method === 'GET' && url.pathname === '/health') {
+      healthChecks.push({ authorization: req.headers.authorization || '' });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        ok: true,
+        service: 'mock-agent',
+        version: '0.1.0',
+        schema: 'xtr.capture/1',
+        authRequired: true
+      }));
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/ingest') {
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => {
+        let body;
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        } catch (_) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: { code: 'bad_request', message: 'invalid JSON' } }));
+          return;
+        }
+        if (req.headers.authorization !== 'Bearer test-token') {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: { code: 'unauthorized', message: 'bad token' } }));
+          return;
+        }
+        ingestRequests.push({ headers: req.headers, body });
+        res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+          ok: true,
+          id: body.id,
+          status: 'queued',
+          category: '测试分类',
+          message: '已入队'
+        }));
+      });
       return;
     }
     if (req.method === 'GET' && url.pathname === '/alice') {
@@ -256,7 +308,7 @@ function startServer() {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address();
-      resolve({ server, port, requests });
+      resolve({ server, port, requests, ingestRequests, healthChecks });
     });
   });
 }
@@ -297,7 +349,7 @@ async function main() {
     process.exit(1);
   }
 
-  const { server, port, requests } = await startServer();
+  const { server, port, requests, ingestRequests, healthChecks } = await startServer();
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xtr-e2e-'));
   const extDir = copyExtension(tmpRoot);
   const profile = path.join(tmpRoot, 'profile');
@@ -346,6 +398,13 @@ async function main() {
         model: 'mock',
         apiKey: '',
         temperature: 0.2
+      },
+      superCopy: {
+        enabled: true,
+        endpoint: 'http://127.0.0.1:' + port + '/ingest',
+        token: 'test-token',
+        includeQuoted: true,
+        includeMedia: true
       }
     };
     await setSettings(browser, extId, settings);
@@ -369,6 +428,17 @@ async function main() {
     const modelOptions = await optionsPage.$$eval('#llmModelOptions option', (els) => els.map((el) => el.value));
     assert.deepEqual(modelOptions.sort(), MOCK_MODELS.slice().sort());
     assert.match(await optionsPage.$eval('#llmToolsStatus', (el) => el.textContent), /2 个模型/);
+
+    // The super-copy target can be checked from the options page.
+    await optionsPage.click('#testSuperCopy');
+    await optionsPage.waitForFunction(
+      () => document.querySelector('#superCopyStatus').textContent.includes('✓'),
+      { timeout: 10000 }
+    );
+    assert.match(await optionsPage.$eval('#superCopyStatus', (el) => el.textContent), /mock-agent/);
+    assert.equal(healthChecks.length, 1);
+    assert.equal(healthChecks[0].authorization, 'Bearer test-token');
+    console.log('✓ 设置页测试 Agent 健康检查');
 
     // Choosing the Magpie preset fills its local gateway but does not switch
     // the provider by itself; the user still saves manually.
@@ -584,10 +654,10 @@ async function main() {
     const copyPage = await browser.newPage();
     await copyPage.setViewport({ width: 1280, height: 900 });
     await copyPage.goto(copyOrigin + '/copy-tweet', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await copyPage.waitForSelector('#copy-actions .xtr-copy-btn', { timeout: 10000 });
+    await copyPage.waitForSelector('#copy-actions .xtr-copy-btn[data-xtr-copy="tweet"]', { timeout: 10000 });
     await copyPage.bringToFront();
     await copyPage.hover('#copy-tweet');
-    await copyPage.click('#copy-actions .xtr-copy-btn');
+    await copyPage.click('#copy-actions .xtr-copy-btn[data-xtr-copy="tweet"]');
     await copyPage.waitForFunction(
       () => {
         const toast = document.querySelector('.xtr-toast');
@@ -600,16 +670,56 @@ async function main() {
       '第一行😀\n第二行\n看这个：https://example.com/full/path?x=1'
     );
     console.log('✓ 推文一键复制保留换行、emoji 和完整链接');
+
+    // Super copy sends a structured capture to the configured agent and also
+    // leaves the text plus the post permalink on the clipboard.
+    await copyPage.click('#copy-actions .xtr-super');
+    await copyPage.waitForFunction(
+      () => {
+        const toast = document.querySelector('.xtr-toast');
+        return !!toast && toast.textContent.includes('已复制并发送到知识库');
+      },
+      { timeout: 5000 }
+    );
+    assert.equal(
+      await copyPage.evaluate(() => navigator.clipboard.readText()),
+      '第一行😀\n第二行\n看这个：https://example.com/full/path?x=1\n\nhttps://x.com/alice/status/789'
+    );
+    assert.equal(ingestRequests.length, 1);
+    const tweetCapture = ingestRequests[0].body;
+    assert.equal(ingestRequests[0].headers.authorization, 'Bearer test-token');
+    assert.equal(ingestRequests[0].headers['idempotency-key'], 'x:tweet:789');
+    assert.match(ingestRequests[0].headers['content-type'], /application\/json/);
+    assert.equal(tweetCapture.schema, 'xtr.capture/1');
+    assert.equal(tweetCapture.id, 'x:tweet:789');
+    assert.equal(tweetCapture.source.type, 'tweet');
+    assert.equal(tweetCapture.source.url, 'https://x.com/alice/status/789');
+    assert.equal(tweetCapture.source.author.handle, 'alice');
+    assert.equal(tweetCapture.source.publishedAt, '2026-11-24T18:00:00.000Z');
+    assert.equal(tweetCapture.content.text, '第一行😀\n第二行\n看这个：https://example.com/full/path?x=1');
+    assert.deepEqual(tweetCapture.links, [
+      { url: 'https://example.com/full/path?x=1', text: 'example.com/full/pa…' }
+    ]);
+    assert.equal(tweetCapture.quoted.content.text, 'Quoted text should not be copied.');
+    assert.equal(tweetCapture.quoted.url, 'https://x.com/bob/status/654');
+    assert.equal(tweetCapture.quoted.author.handle, 'bob');
+    assert.equal(tweetCapture.quoted.media.length, 1);
+    assert.equal(tweetCapture.quoted.media[0].url, 'https://pbs.twimg.com/media/quotedimg?format=png&name=large');
+    assert.equal(tweetCapture.media.length, 1);
+    assert.equal(tweetCapture.media[0].url, 'https://pbs.twimg.com/media/abc123?format=jpg&name=large');
+    assert.equal(tweetCapture.media[0].alt, '一张图表');
+    assert.equal(tweetCapture.thread, null);
+    console.log('✓ 推文超级复制发送正文、链接、引用推文和图片');
     await copyPage.close();
 
     const copyArticlePage = await browser.newPage();
     await copyArticlePage.goto(copyOrigin + '/copy-article', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await copyArticlePage.waitForSelector(
-      '[data-testid="twitter-article-title"] ~ .xtr-article-copy',
+      '[data-testid="twitter-article-title"] ~ .xtr-article-copy:not(.xtr-article-super)',
       { timeout: 10000 }
     );
     await copyArticlePage.bringToFront();
-    await copyArticlePage.click('[data-testid="twitter-article-title"] ~ .xtr-article-copy');
+    await copyArticlePage.click('[data-testid="twitter-article-title"] ~ .xtr-article-copy:not(.xtr-article-super)');
     await copyArticlePage.waitForFunction(
       () => {
         const toast = document.querySelector('.xtr-toast');
@@ -622,6 +732,35 @@ async function main() {
       '如何构建知识工厂\n\n第一段。\n\n小标题\n\n第二段，见 https://example.com/a/b?c=1。\n\n- 列表项一\n- 列表项二\n\n图片说明：图片说明'
     );
     console.log('✓ 文章一键复制标题、正文、列表和完整链接');
+
+    const articleBodyText = '第一段。\n\n小标题\n\n第二段，见 https://example.com/a/b?c=1。\n\n- 列表项一\n- 列表项二\n\n图片说明：图片说明';
+    await copyArticlePage.click('[data-testid="twitter-article-title"] ~ .xtr-article-super');
+    await copyArticlePage.waitForFunction(
+      () => {
+        const toast = document.querySelector('.xtr-toast');
+        return !!toast && toast.textContent.includes('已复制并发送到知识库');
+      },
+      { timeout: 5000 }
+    );
+    assert.equal(
+      await copyArticlePage.evaluate(() => navigator.clipboard.readText()),
+      '如何构建知识工厂\n\n' + articleBodyText + '\n\n' + copyOrigin + '/copy-article'
+    );
+    assert.equal(ingestRequests.length, 2);
+    const articleCapture = ingestRequests[1].body;
+    assert.equal(articleCapture.source.type, 'article');
+    assert.equal(articleCapture.source.url, copyOrigin + '/copy-article');
+    assert.equal(articleCapture.source.author.handle, 'alice');
+    assert.equal(articleCapture.content.title, '如何构建知识工厂');
+    assert.equal(articleCapture.content.text, articleBodyText);
+    assert.deepEqual(articleCapture.links, [
+      { url: 'https://example.com/a/b?c=1', text: 'example.com/a/b…' }
+    ]);
+    assert.equal(articleCapture.media.length, 1);
+    assert.equal(articleCapture.media[0].url, 'https://pbs.twimg.com/media/def456?format=jpg&name=large');
+    assert.equal(articleCapture.media[0].alt, '架构图');
+    assert.equal(articleCapture.media[0].caption, '图片说明');
+    console.log('✓ 文章超级复制发送标题、正文、链接和图片');
     await copyArticlePage.close();
 
     assert.ok(requests.length > 0, '应该至少请求过一次大模型接口');

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "X 翻译 — 推文自动翻译",
   "short_name": "X 翻译",
-  "version": "0.2.2",
-  "description": "在 X（Twitter）时间线上自动翻译外语推文，支持 Chrome 本地翻译、Google、DeepSeek 等，可双语对照或隐藏译文。",
+  "version": "0.3.0",
+  "description": "在 X（Twitter）时间线上自动翻译外语推文，并支持把推文/文章超级复制到本地知识库 Agent。",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage"

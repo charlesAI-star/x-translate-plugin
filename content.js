@@ -51,6 +51,8 @@
   let copyActions = new WeakMap();
   let tweetCopyButtons = new WeakMap();
   let articleCopyButtons = new WeakMap();
+  let tweetSuperButtons = new WeakMap();
+  let articleSuperButtons = new WeakMap();
   let intersection = null;
   let mutationObserver = null;
   let scanTimer = null;
@@ -91,6 +93,7 @@
     if (!html) return;
     html.classList.toggle('xtr-disabled', !settings.enabled);
     html.classList.toggle('xtr-hide-provider', !settings.showProviderLabel);
+    html.classList.toggle('xtr-no-supercopy', !settings.superCopy.enabled);
   }
 
   function onSettingsChanged(prev, next) {
@@ -438,17 +441,18 @@
     return depth;
   }
 
+  function articleBodyRoot() {
+    return document.querySelector(ARTICLE_BODY_ROOTS.join(','));
+  }
+
   function articleRoot() {
-    const body = document.querySelector(ARTICLE_BODY_ROOTS.join(','));
+    const body = articleBodyRoot();
     if (!body) return null;
     return body.closest('article') || document;
   }
 
-  function articleCopyText() {
-    const root = articleRoot();
+  function articleBodyText(root) {
     if (!root) return '';
-    const titleEl = root.querySelector(ARTICLE_TITLE);
-    const title = titleEl ? textForCopy(titleEl) : '';
     const nodes = Array.from(root.querySelectorAll(ARTICLE_COPY_BLOCK))
       .filter((node) => !node.closest('.xtr-block, .xtr-chip'))
       .filter((node) => !node.querySelector(ARTICLE_COPY_BLOCK));
@@ -486,7 +490,7 @@
       parts.push({ text: prefix + text, kind });
     }
 
-    let out = title;
+    let out = '';
     let prevKind = '';
     for (const part of parts) {
       if (out) out += part.kind === 'li' && prevKind === 'li' ? '\n' : '\n\n';
@@ -494,6 +498,349 @@
       prevKind = part.kind;
     }
     return core.cleanText(out);
+  }
+
+  function articleCopyText() {
+    const root = articleRoot();
+    if (!root) return '';
+    const titleEl = root.querySelector(ARTICLE_TITLE);
+    const title = titleEl ? textForCopy(titleEl) : '';
+    const body = articleBodyText(root);
+    let out = title;
+    if (out && body) out += '\n\n';
+    out += body;
+    return core.cleanText(out);
+  }
+
+  function canonicalStatusUrl(href) {
+    try {
+      const u = new URL(href, location.origin);
+      const idMatch = u.pathname.match(/\/status\/(\d+)/);
+      if (!idMatch) return '';
+      const userMatch = u.pathname.match(/^\/([^/]+)\/status\//);
+      return userMatch
+        ? 'https://x.com/' + userMatch[1] + '/status/' + idMatch[1]
+        : 'https://x.com/i/web/status/' + idMatch[1];
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function canonicalArticleUrl(href) {
+    try {
+      const u = new URL(href, location.origin);
+      const idMatch = u.pathname.match(/\/article\/(\d+)/);
+      if (!idMatch) return '';
+      const userMatch = u.pathname.match(/^\/([^/]+)\/article\//);
+      return userMatch
+        ? 'https://x.com/' + userMatch[1] + '/article/' + idMatch[1]
+        : 'https://x.com/i/article/' + idMatch[1];
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function statusUrlFor(article) {
+    const links = Array.from(article.querySelectorAll('a[href*="/status/"]'))
+      .filter((link) => link.closest(TWEET_ARTICLE) === article);
+    const withTime = links.find((link) => link.querySelector('time'));
+    const link = withTime || links[0];
+    const url = link ? canonicalStatusUrl(link.getAttribute('href')) : '';
+    if (url) return url;
+    const pageUrl = canonicalStatusUrl(location.href);
+    if (pageUrl) return pageUrl;
+    return location.href.split('#')[0];
+  }
+
+  function articleUrlFor(root) {
+    const pageUrl = canonicalArticleUrl(location.href);
+    if (pageUrl) return pageUrl;
+    const link = root.querySelector('a[href*="/article/"]');
+    if (link) {
+      const url = canonicalArticleUrl(link.getAttribute('href'));
+      if (url) return url;
+    }
+    const statusLink = root.querySelector('a[href*="/status/"]');
+    if (statusLink) {
+      const url = canonicalStatusUrl(statusLink.getAttribute('href'));
+      if (url) return url;
+    }
+    return location.href.split('#')[0];
+  }
+
+  function authorFor(root) {
+    const box = root.querySelector('[data-testid="User-Name"]')
+      || document.querySelector('[data-testid="User-Name"]');
+    if (box) {
+      const profile = Array.from(box.querySelectorAll('a[href^="/"]')).find((link) => {
+        const path = String(link.getAttribute('href') || '').split(/[?#]/)[0];
+        return /^\/[A-Za-z0-9_]+$/.test(path);
+      });
+      if (profile) {
+        return {
+          name: (profile.textContent || '').trim(),
+          handle: String(profile.getAttribute('href') || '').replace(/^\//, '')
+        };
+      }
+    }
+    const pageMatch = location.pathname.match(/^\/([A-Za-z0-9_]+)\/(?:status|article)\//);
+    return { name: '', handle: pageMatch ? pageMatch[1] : '' };
+  }
+
+  function publishedAtFor(root, scopeArticle) {
+    const times = Array.from(root.querySelectorAll('time[datetime]'));
+    const time = scopeArticle
+      ? times.find((el) => el.closest(TWEET_ARTICLE) === scopeArticle)
+      : times[0];
+    return time ? time.getAttribute('datetime') : '';
+  }
+
+  function isXHost(hostname) {
+    return /(^|\.)(x\.com|twitter\.com)$/i.test(String(hostname || ''));
+  }
+
+  function collectLinks(root) {
+    if (!root) return [];
+    const out = [];
+    const seen = new Set();
+    for (const anchor of root.querySelectorAll('a[href]')) {
+      if (anchor.closest('.xtr-block, .xtr-chip, [data-xtr-copy]')) continue;
+      if (anchor.closest('[data-testid="tweet-text-show-more-link"]')) continue;
+      const url = copyUrlFor(anchor);
+      if (!url) continue;
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch (_) {
+        continue;
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
+      if (isXHost(parsed.hostname)) continue;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      out.push({ url, text: (anchor.textContent || '').trim().slice(0, 200) });
+      if (out.length >= 100) break;
+    }
+    return out;
+  }
+
+  function normalizeMediaUrl(raw) {
+    try {
+      const u = new URL(raw, location.origin);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+      if (!/(^|\.)pbs\.twimg\.com$/i.test(u.hostname)) return '';
+      if (!/^\/(media|ext_tw_video_thumb|amplify_video_thumb)\//.test(u.pathname)) return '';
+      const name = u.searchParams.get('name');
+      if (!name || name === 'small' || name === 'medium') u.searchParams.set('name', 'large');
+      return u.toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function collectMedia(root, scopeArticle) {
+    if (!root) return [];
+    const out = [];
+    const seen = new Set();
+    const images = root.querySelectorAll('img[src]');
+    for (const img of images) {
+      if (scopeArticle && img.closest(TWEET_ARTICLE) !== scopeArticle) continue;
+      if (img.closest('.xtr-block, .xtr-chip, [data-xtr-copy]')) continue;
+      const raw = img.getAttribute('src') || '';
+      const url = normalizeMediaUrl(raw);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      let previewUrl = '';
+      try {
+        previewUrl = new URL(raw, location.origin).toString();
+      } catch (_) {
+        previewUrl = raw;
+      }
+      const figure = img.closest('figure');
+      const caption = figure ? figure.querySelector('figcaption') : null;
+      out.push({
+        type: 'image',
+        url,
+        previewUrl,
+        alt: (img.getAttribute('alt') || '').trim(),
+        caption: caption ? (caption.textContent || '').trim() : ''
+      });
+      if (out.length >= 50) break;
+    }
+    return out;
+  }
+
+  function captureIdFor(type, url, text) {
+    const match = String(url || '').match(/\/(?:status|article)\/(\d+)/);
+    if (match) return 'x:' + type + ':' + match[1];
+    return 'x:' + type + ':' + core.hashText(String(url || '') + '|' + String(text || '')).slice(0, 24);
+  }
+
+  function captureQuoted(article) {
+    if (!settings.superCopy.includeQuoted) return null;
+    const quoted = Array.from(article.querySelectorAll(TWEET_ARTICLE))
+      .find((node) => node !== article && node.closest(TWEET_ARTICLE) === node);
+    if (!quoted) return null;
+    const node = mainTweetTextNode(quoted);
+    if (!node) return null;
+    const text = textForCopy(node);
+    if (!text) return null;
+    const url = statusUrlFor(quoted);
+    return {
+      id: captureIdFor('tweet', url, text),
+      url,
+      author: authorFor(quoted),
+      publishedAt: publishedAtFor(quoted, quoted) || null,
+      content: {
+        text,
+        language: node.getAttribute('lang') || null
+      },
+      links: collectLinks(node),
+      media: settings.superCopy.includeMedia ? collectMedia(quoted, quoted) : []
+    };
+  }
+
+  function captureTweet(article) {
+    const node = mainTweetTextNode(article);
+    if (!node) return null;
+    const text = textForCopy(node);
+    if (!text) return null;
+    const url = statusUrlFor(article);
+    return {
+      schema: 'xtr.capture/1',
+      id: captureIdFor('tweet', url, text),
+      capturedAt: new Date().toISOString(),
+      source: {
+        platform: 'x',
+        type: 'tweet',
+        url,
+        author: authorFor(article),
+        publishedAt: publishedAtFor(article, article) || null,
+        language: node.getAttribute('lang') || null
+      },
+      content: { title: null, text, truncated: false },
+      links: collectLinks(node),
+      quoted: captureQuoted(article),
+      media: settings.superCopy.includeMedia ? collectMedia(article, article) : [],
+      thread: null,
+      client: {
+        name: 'x-translate-plugin',
+        version: chrome.runtime.getManifest().version
+      }
+    };
+  }
+
+  function captureArticle() {
+    const root = articleRoot();
+    const body = articleBodyRoot();
+    if (!root || !body) return null;
+    const titleEl = root.querySelector(ARTICLE_TITLE);
+    const title = titleEl ? textForCopy(titleEl) : '';
+    const text = articleBodyText(root);
+    if (!text) return null;
+    const url = articleUrlFor(root);
+    return {
+      schema: 'xtr.capture/1',
+      id: captureIdFor('article', url, title + '|' + text),
+      capturedAt: new Date().toISOString(),
+      source: {
+        platform: 'x',
+        type: 'article',
+        url,
+        author: authorFor(root),
+        publishedAt: publishedAtFor(root) || null,
+        language: body.getAttribute('lang') || document.documentElement.lang || null
+      },
+      content: { title: title || null, text, truncated: false },
+      links: collectLinks(body),
+      quoted: null,
+      media: settings.superCopy.includeMedia ? collectMedia(body) : [],
+      thread: null,
+      client: {
+        name: 'x-translate-plugin',
+        version: chrome.runtime.getManifest().version
+      }
+    };
+  }
+
+  function superCopyClipboardText(capture) {
+    const parts = [];
+    if (capture.content.title) parts.push(capture.content.title);
+    if (capture.content.text && capture.content.text !== capture.content.title) {
+      parts.push(capture.content.text);
+    }
+    if (capture.source.url) parts.push(capture.source.url);
+    return parts.join('\n\n').trim();
+  }
+
+  function openOptionsPage() {
+    try {
+      chrome.runtime.sendMessage({ type: 'xtr:openOptions' });
+    } catch (_) {
+      // Ignore; the user can open the options page manually.
+    }
+  }
+
+  async function runSuperCopy(capture, label) {
+    if (!capture || !capture.content || !capture.content.text) {
+      showToast('这条' + (label || '内容') + '没有可发送的文字', { timeout: 3000 });
+      return;
+    }
+    if (!settings.superCopy.enabled) {
+      showToast('超级复制未启用', { actionLabel: '打开设置', onAction: openOptionsPage, timeout: 8000 });
+      return;
+    }
+    if (!String(settings.superCopy.endpoint || '').trim()) {
+      showToast('请先配置 Agent 接收地址', { actionLabel: '打开设置', onAction: openOptionsPage, timeout: 8000 });
+      return;
+    }
+
+    const copied = await copyTextToClipboard(superCopyClipboardText(capture));
+    showToast('正在发送到知识库…', { timeout: 0 });
+    const res = await sendBgMessage({ type: 'xtr:superCopy', capture }, 25000);
+    if (res && res.ok) {
+      const data = res.response || {};
+      const category = typeof data.category === 'string' && data.category.trim()
+        ? '（' + data.category.trim() + '）'
+        : '';
+      const message = typeof data.message === 'string' && data.message.trim()
+        ? '：' + data.message.trim()
+        : '';
+      const base = copied ? '已复制并发送到知识库' : '已发送到知识库（复制失败）';
+      const duplicate = data.status === 'duplicate';
+      showToast(duplicate ? (copied ? '已复制；这条内容已在知识库中' : '这条内容已在知识库中') : base + category + message, {
+        timeout: 4000
+      });
+      return;
+    }
+
+    const error = (res && res.error) || { code: 'error', message: '发送失败' };
+    const prefix = copied ? '已复制；' : '';
+    if (error.code === 'permission') {
+      showToast(prefix + '需要授权访问 Agent 地址', {
+        actionLabel: '打开设置',
+        onAction: openOptionsPage,
+        timeout: 9000
+      });
+      return;
+    }
+    if (error.code === 'disabled') {
+      showToast('超级复制未启用', { actionLabel: '打开设置', onAction: openOptionsPage, timeout: 9000 });
+      return;
+    }
+    showToast(prefix + '发送失败：' + (error.message || '未知错误'), {
+      actionLabel: '重试',
+      onAction: () => runSuperCopy(capture, label),
+      timeout: 9000
+    });
+  }
+
+  function superCopyTweetArticle(article) {
+    runSuperCopy(captureTweet(article), '推文');
+  }
+
+  function superCopyArticle() {
+    runSuperCopy(captureArticle(), '文章');
   }
 
   async function copyTweetArticle(article) {
@@ -510,13 +857,19 @@
   }
 
   function createCopyButton(kind, action) {
+    const isArticle = kind === 'article' || kind === 'super-article';
+    const isSuper = kind === 'super-tweet' || kind === 'super-article';
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = kind === 'article' ? 'xtr-article-copy' : 'xtr-copy-btn';
+    button.className = (isArticle ? 'xtr-article-copy' : 'xtr-copy-btn')
+      + (isSuper ? (isArticle ? ' xtr-article-super' : ' xtr-super') : '');
     button.setAttribute('data-xtr-copy', kind);
-    button.setAttribute('aria-label', kind === 'article' ? '复制文章全文' : '复制推文文字');
-    button.title = kind === 'article' ? '复制文章全文' : '复制推文文字';
-    button.textContent = kind === 'article' ? '复制全文' : '复制';
+    const label = isSuper
+      ? (isArticle ? '超级复制：复制文章全文并发送到知识库' : '超级复制：复制推文并发送到知识库')
+      : (isArticle ? '复制文章全文' : '复制推文文字');
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.textContent = isSuper ? (isArticle ? '存全文' : '存知识库') : (isArticle ? '复制全文' : '复制');
     copyActions.set(button, action);
     return button;
   }
@@ -542,6 +895,17 @@
           articleCopyButtons.set(articleTitle, articleButton);
           if (!insertCopyButtonAfter(articleTitle, articleButton)) {
             articleCopyButtons.delete(articleTitle);
+            articleButton = null;
+          }
+        }
+        if (articleButton) {
+          let articleSuper = articleSuperButtons.get(articleTitle);
+          if (!articleSuper || !articleSuper.isConnected) {
+            articleSuper = createCopyButton('super-article', superCopyArticle);
+            articleSuperButtons.set(articleTitle, articleSuper);
+            if (!insertCopyButtonAfter(articleButton, articleSuper)) {
+              articleSuperButtons.delete(articleTitle);
+            }
           }
         }
       }
@@ -554,17 +918,30 @@
       const groups = Array.from(article.querySelectorAll('[role="group"]'))
         .filter((group) => group.closest(TWEET_ARTICLE) === article);
       const group = groups.length ? groups[groups.length - 1] : null;
-      let button = tweetCopyButtons.get(article);
-      if (button && button.isConnected) {
-        if (group && button.parentElement !== group) group.appendChild(button);
-        continue;
+
+      let copyButton = tweetCopyButtons.get(article);
+      if (!copyButton || !copyButton.isConnected) {
+        copyButton = createCopyButton('tweet', () => copyTweetArticle(article));
+        tweetCopyButtons.set(article, copyButton);
       }
-      button = createCopyButton('tweet', () => copyTweetArticle(article));
-      tweetCopyButtons.set(article, button);
+      let superButton = tweetSuperButtons.get(article);
+      if (!superButton || !superButton.isConnected) {
+        superButton = createCopyButton('super-tweet', () => superCopyTweetArticle(article));
+        tweetSuperButtons.set(article, superButton);
+      }
+
       if (group) {
-        group.appendChild(button);
-      } else if (!insertCopyButtonAfter(textNode, button)) {
-        tweetCopyButtons.delete(article);
+        if (!group.contains(copyButton)) group.appendChild(copyButton);
+        if (!group.contains(superButton)) group.appendChild(superButton);
+      } else {
+        if (!copyButton.isConnected && !insertCopyButtonAfter(textNode, copyButton)) {
+          tweetCopyButtons.delete(article);
+          tweetSuperButtons.delete(article);
+          continue;
+        }
+        if (!superButton.isConnected && !insertCopyButtonAfter(copyButton, superButton)) {
+          tweetSuperButtons.delete(article);
+        }
       }
     }
   }
