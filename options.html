@@ -229,6 +229,59 @@
 
       <section class="card">
         <div class="card-head">
+          <h2>超级复制</h2>
+          <p>把推文或文章连同链接发送到本地/远程 Agent，用于构建知识库。默认关闭。</p>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">启用超级复制</div>
+            <div class="setting-desc">推文操作栏显示「存知识库」，文章标题旁显示「存全文」；点击时复制并发送。</div>
+          </div>
+          <label class="switch">
+            <input id="superCopyEnabled" type="checkbox">
+            <span class="slider"></span>
+            <span class="sr-only">启用超级复制</span>
+          </label>
+        </div>
+
+        <div class="field-grid super-copy-fields">
+          <label class="field">
+            <span class="field-label">Agent 接收地址</span>
+            <input id="superCopyEndpoint" class="input" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:8787/ingest">
+          </label>
+          <label class="field">
+            <span class="field-label">Token（可选）</span>
+            <input id="superCopyToken" class="input" type="password" spellcheck="false" autocomplete="off" placeholder="远程服务建议填写">
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">包含引用推文</div>
+            <div class="setting-desc">发送推文时，把引用的推文正文、链接和图片一并带上。</div>
+          </div>
+          <label class="check"><input id="superCopyIncludeQuoted" type="checkbox"></label>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-copy">
+            <div class="setting-title">包含图片</div>
+            <div class="setting-desc">发送推文/文章中的图片 URL、描述和图片说明。</div>
+          </div>
+          <label class="check"><input id="superCopyIncludeMedia" type="checkbox"></label>
+        </div>
+
+        <div class="button-row">
+          <button id="testSuperCopy" class="btn btn-secondary" type="button">测试连接</button>
+          <span id="superCopyStatus" class="scan-status" role="status"></span>
+        </div>
+
+        <p class="note">接收端需要提供 <code>POST /ingest</code> 和 <code>GET /health</code>；完整接口约定见 <code>docs/super-copy-agent-api.md</code>。远程地址请使用 HTTPS 并设置 Token。</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
           <h2>高级</h2>
           <p>一般保持默认即可。</p>
         </div>
@@ -267,7 +320,7 @@
         <div class="card-head">
           <h2>隐私与说明</h2>
         </div>
-        <p>扩展只在 <code>x.com</code>、<code>twitter.com</code> 上运行，只读取时间线中的推文文本。使用 Google、大模型或 Microsoft Translator 时，推文文本会发送到你选择的服务；使用 Chrome 内置翻译时，文本留在本机。</p>
+        <p>扩展只在 <code>x.com</code>、<code>twitter.com</code> 上运行，只读取时间线中的推文文本。使用 Google、大模型或 Microsoft Translator 时，推文文本会发送到你选择的服务；使用 Chrome 内置翻译时，文本留在本机。开启超级复制后，只有点击「存知识库 / 存全文」时才会把内容发送到你配置的 Agent 地址。</p>
         <p>本项目与 X Corp. 无关。译文由第三方模型生成，可能存在错误，请以原文为准。</p>
         <p class="muted">如果你需要更完整的功能（整页翻译、PDF、字幕、更多站点规则），可以直接使用现成项目：<a href="https://github.com/fishjar/kiss-translator" target="_blank" rel="noreferrer">Kiss Translator（开源）</a> 或 <a href="https://immersivetranslate.com/" target="_blank" rel="noreferrer">沉浸式翻译</a>。</p>
         <p class="muted">版本 <span id="version"></span> · 参考了 Kiss Translator 的 X 页面选择器思路。</p>

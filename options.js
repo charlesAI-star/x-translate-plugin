@@ -32,6 +32,13 @@
     azureKey: $('azureKey'),
     azureRegion: $('azureRegion'),
     mymemoryEmail: $('mymemoryEmail'),
+    superCopyEnabled: $('superCopyEnabled'),
+    superCopyEndpoint: $('superCopyEndpoint'),
+    superCopyToken: $('superCopyToken'),
+    superCopyIncludeQuoted: $('superCopyIncludeQuoted'),
+    superCopyIncludeMedia: $('superCopyIncludeMedia'),
+    testSuperCopy: $('testSuperCopy'),
+    superCopyStatus: $('superCopyStatus'),
     testText: $('testText'),
     testBtn: $('testBtn'),
     testResult: $('testResult'),
@@ -106,6 +113,11 @@
     els.azureKey.value = next.azure.key;
     els.azureRegion.value = next.azure.region;
     els.mymemoryEmail.value = next.mymemory.email;
+    els.superCopyEnabled.checked = !!next.superCopy.enabled;
+    els.superCopyEndpoint.value = next.superCopy.endpoint;
+    els.superCopyToken.value = next.superCopy.token;
+    els.superCopyIncludeQuoted.checked = !!next.superCopy.includeQuoted;
+    els.superCopyIncludeMedia.checked = !!next.superCopy.includeMedia;
     const radio = document.querySelector(`input[name="provider"][value="${next.provider}"]`);
     if (radio) radio.checked = true;
     updatePanels();
@@ -137,6 +149,13 @@
       },
       mymemory: {
         email: els.mymemoryEmail.value
+      },
+      superCopy: {
+        enabled: els.superCopyEnabled.checked,
+        endpoint: els.superCopyEndpoint.value,
+        token: els.superCopyToken.value,
+        includeQuoted: els.superCopyIncludeQuoted.checked,
+        includeMedia: els.superCopyIncludeMedia.checked
       }
     });
   }
@@ -156,6 +175,16 @@
     }
     if (next.provider === 'azure' && !next.azure.key) {
       return 'Microsoft Translator 还没有填写 Key。';
+    }
+    if (next.superCopy.enabled && !next.superCopy.endpoint) {
+      return '启用超级复制前，请填写 Agent 接收地址。';
+    }
+    if (next.superCopy.endpoint) {
+      try {
+        core.normalizeEndpoint(next.superCopy.endpoint);
+      } catch (err) {
+        return 'Agent 接收地址无效：' + err.message;
+      }
     }
     return '';
   }
@@ -208,6 +237,37 @@
     }
     els.llmPermissionHint.classList.remove('hidden');
     els.llmPermissionHint.textContent = '未授权访问这个大模型 API 域名。扩展可能无法发出翻译请求，请重新保存并允许权限。';
+  }
+
+  function requestSuperCopyPermission(force = false) {
+    if (!force && !els.superCopyEnabled.checked) return Promise.resolve(true);
+    const raw = els.superCopyEndpoint.value.trim();
+    if (!raw) return Promise.resolve(true);
+    let origin;
+    try {
+      origin = core.originPattern(core.normalizeEndpoint(raw));
+    } catch (_) {
+      return Promise.resolve(true);
+    }
+    if (!origin) return Promise.resolve(true);
+    try {
+      return chrome.permissions.request({ origins: [origin] });
+    } catch (_) {
+      return Promise.resolve(false);
+    }
+  }
+
+  function setSuperCopyStatus(message, type = '') {
+    els.superCopyStatus.textContent = message || '';
+    els.superCopyStatus.className = 'scan-status' + (type ? ' ' + type : '');
+  }
+
+  function showSuperCopyPermissionHint(granted) {
+    if (granted) {
+      setSuperCopyStatus('');
+      return;
+    }
+    setSuperCopyStatus('未授权访问这个 Agent 地址，发送会失败。请重新保存并允许权限。', 'error');
   }
 
   function setLlmToolsStatus(message, type = '') {
@@ -341,10 +401,53 @@
     }
   }
 
+  async function testSuperCopyConnection() {
+    const raw = els.superCopyEndpoint.value.trim();
+    if (!raw) {
+      setSuperCopyStatus('请先填写 Agent 接收地址。', 'error');
+      return;
+    }
+    let endpoint;
+    try {
+      endpoint = core.normalizeEndpoint(raw);
+    } catch (err) {
+      setSuperCopyStatus('地址无效：' + err.message, 'error');
+      return;
+    }
+    // permissions.request must run before the first await (user gesture).
+    const permissionPromise = requestSuperCopyPermission(true);
+    const granted = await permissionPromise;
+    if (!granted) {
+      setSuperCopyStatus('未授权访问这个地址，请重新点「测试连接」并允许权限。', 'error');
+      return;
+    }
+
+    els.testSuperCopy.disabled = true;
+    els.testSuperCopy.textContent = '测试中…';
+    setSuperCopyStatus('正在连接…');
+    const res = await sendRuntime({
+      type: 'xtr:testSuperCopy',
+      endpoint,
+      token: els.superCopyToken.value.trim()
+    }, 12000);
+    els.testSuperCopy.disabled = false;
+    els.testSuperCopy.textContent = '测试连接';
+    if (!res || !res.ok) {
+      setSuperCopyStatus('✗ ' + ((res && res.error && res.error.message) || '连接失败'), 'error');
+      return;
+    }
+    const data = res.response || {};
+    const service = typeof data.service === 'string' && data.service ? data.service : 'Agent';
+    const version = typeof data.version === 'string' && data.version ? ' v' + data.version : '';
+    const ms = res.ms != null ? res.ms : 0;
+    setSuperCopyStatus('✓ ' + service + version + '（' + ms + ' ms）', 'success');
+  }
+
   async function save() {
     if (saving) return;
     saving = true;
     const permissionPromise = requestLlmPermission();
+    const superPermissionPromise = requestSuperCopyPermission();
     const next = readForm();
     const problem = validate(next);
     if (problem) {
@@ -354,7 +457,9 @@
     }
 
     const granted = await permissionPromise;
+    const superGranted = await superPermissionPromise;
     showPermissionHint(granted);
+    if (els.superCopyEnabled.checked) showSuperCopyPermissionHint(superGranted);
 
     try {
       await chrome.storage.local.set({ settings: next });
@@ -554,6 +659,10 @@
     });
 
     els.testBtn.addEventListener('click', runTest);
+    els.testSuperCopy.addEventListener('click', testSuperCopyConnection);
+    els.superCopyEndpoint.addEventListener('input', () => setSuperCopyStatus(''));
+    els.superCopyToken.addEventListener('input', () => setSuperCopyStatus(''));
+    els.superCopyEnabled.addEventListener('change', () => setSuperCopyStatus(''));
     els.clearCache.addEventListener('click', async () => {
       const res = await sendRuntime({ type: 'xtr:clearCache' }, 10000);
       if (res && res.ok) showToast('翻译缓存已清除');

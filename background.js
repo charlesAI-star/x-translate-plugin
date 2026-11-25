@@ -16,6 +16,12 @@ const { shared, core, providers } = {
 const CACHE_KEY = 'xtrTranslationCache';
 const CACHE_VERSION = 2;
 const CACHE_LIMIT = 3000;
+const SUPER_COPY_TIMEOUT_MS = 15000;
+const SUPER_COPY_TEST_TIMEOUT_MS = 8000;
+const MAX_CAPTURE_TEXT = 200000;
+const MAX_CAPTURE_BYTES = 2 * 1024 * 1024;
+const MAX_CAPTURE_LINKS = 100;
+const MAX_CAPTURE_MEDIA = 50;
 
 let settingsCache = null;
 let cache = new Map();
@@ -354,6 +360,212 @@ async function handleScanLocal() {
   }
 }
 
+/* ------------------------------------------------------------- super copy */
+
+function superCopyError(code, message, extra) {
+  return { ok: false, error: Object.assign({ code, message }, extra || {}) };
+}
+
+function superCopyHttpCode(status) {
+  if (status === 401 || status === 403) return 'unauthorized';
+  if (status === 404) return 'not_found';
+  if (status === 413) return 'too_large';
+  if (status === 429) return 'rate_limited';
+  if (status >= 500) return 'server_error';
+  return 'bad_response';
+}
+
+function superCopyMessage(data, fallback) {
+  if (data && data.error && typeof data.error.message === 'string') return data.error.message;
+  if (data && typeof data.message === 'string') return data.message;
+  return fallback;
+}
+
+function parseJsonBody(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * The content script builds the capture. The service worker only validates
+ * its shape and size so a page bug cannot send an unbounded payload.
+ */
+function normalizeCapture(raw) {
+  if (!raw || typeof raw !== 'object') return { error: 'capture 必须是对象' };
+  let capture;
+  try {
+    capture = JSON.parse(JSON.stringify(raw));
+  } catch (_) {
+    return { error: 'capture 不是可序列化的 JSON' };
+  }
+  if (capture.schema !== 'xtr.capture/1') return { error: '不支持的 capture.schema' };
+  if (typeof capture.id !== 'string' || !capture.id.trim()) return { error: '缺少 capture.id' };
+  if (!capture.source || typeof capture.source !== 'object') return { error: '缺少 capture.source' };
+  if (capture.source.platform !== 'x') return { error: 'capture.source.platform 必须是 x' };
+  if (capture.source.type !== 'tweet' && capture.source.type !== 'article') {
+    return { error: 'capture.source.type 必须是 tweet 或 article' };
+  }
+  if (typeof capture.source.url !== 'string' || !/^https?:\/\//i.test(capture.source.url)) {
+    return { error: '缺少有效的 capture.source.url' };
+  }
+  if (!capture.content || typeof capture.content !== 'object') return { error: '缺少 capture.content' };
+  if (typeof capture.content.text !== 'string' || !capture.content.text.trim()) {
+    return { error: 'capture.content.text 不能为空' };
+  }
+  if (!capture.capturedAt) capture.capturedAt = new Date().toISOString();
+  if (!capture.client || typeof capture.client !== 'object') {
+    capture.client = { name: 'x-translate-plugin', version: chrome.runtime.getManifest().version };
+  }
+  if (capture.content.text.length > MAX_CAPTURE_TEXT) {
+    capture.content.text = capture.content.text.slice(0, MAX_CAPTURE_TEXT);
+    capture.content.truncated = true;
+  }
+  if (Array.isArray(capture.links)) capture.links = capture.links.slice(0, MAX_CAPTURE_LINKS);
+  if (Array.isArray(capture.media)) capture.media = capture.media.slice(0, MAX_CAPTURE_MEDIA);
+  if (capture.quoted && capture.quoted.content && typeof capture.quoted.content.text === 'string'
+    && capture.quoted.content.text.length > MAX_CAPTURE_TEXT) {
+    capture.quoted.content.text = capture.quoted.content.text.slice(0, MAX_CAPTURE_TEXT);
+    capture.quoted.content.truncated = true;
+  }
+  return { capture };
+}
+
+async function superCopyEndpointFromSettings() {
+  const settings = await getSettings();
+  const sc = settings.superCopy || {};
+  if (!sc.enabled) return { error: superCopyError('disabled', '超级复制未启用') };
+  let endpoint;
+  try {
+    endpoint = core.normalizeEndpoint(sc.endpoint);
+  } catch (err) {
+    return { error: superCopyError('bad_request', err.message || '接收地址无效') };
+  }
+  const origin = core.originPattern(endpoint);
+  if (!origin || !(await hasOriginPermission(origin))) {
+    return {
+      error: superCopyError(
+        'permission',
+        '需要授权访问 ' + (origin || endpoint) + '，请在设置页保存并允许权限。'
+      )
+    };
+  }
+  return { endpoint, token: String(sc.token || '').trim() };
+}
+
+async function handleSuperCopy(msg) {
+  const target = await superCopyEndpointFromSettings();
+  if (target.error) return target.error;
+  const checked = normalizeCapture(msg.capture);
+  if (checked.error) return superCopyError('bad_request', checked.error);
+  const capture = checked.capture;
+  const body = JSON.stringify(capture);
+  const bytes = new TextEncoder().encode(body).length;
+  if (bytes > MAX_CAPTURE_BYTES) {
+    return superCopyError('too_large', '内容太大（' + Math.round(bytes / 1024) + ' KB），已超过 2 MB 限制。');
+  }
+
+  const headers = {
+    'Content-Type': 'application/json; charset=utf-8',
+    'X-XTR-Client': 'x-translate-plugin/' + chrome.runtime.getManifest().version,
+    'Idempotency-Key': capture.id
+  };
+  if (target.token) headers.Authorization = 'Bearer ' + target.token;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SUPER_COPY_TIMEOUT_MS);
+  const started = Date.now();
+  try {
+    const res = await fetch(target.endpoint, {
+      method: 'POST',
+      headers,
+      body,
+      credentials: 'omit',
+      redirect: 'error',
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    const text = await res.text();
+    const data = parseJsonBody(text);
+    if (!res.ok) {
+      return superCopyError(
+        superCopyHttpCode(res.status),
+        superCopyMessage(data, 'Agent 返回 HTTP ' + res.status),
+        { status: res.status }
+      );
+    }
+    if (data && data.ok === false) {
+      return superCopyError('bad_response', superCopyMessage(data, 'Agent 拒绝了这条内容'), { status: res.status });
+    }
+    return { ok: true, status: res.status, response: data, ms: Date.now() - started };
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      return superCopyError('timeout', 'Agent 响应超时，请检查服务是否正在处理但未及时返回。');
+    }
+    return superCopyError('network', '无法连接 Agent：' + (err && err.message ? err.message : String(err)));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function handleTestSuperCopy(msg) {
+  let endpoint;
+  try {
+    endpoint = core.normalizeEndpoint(msg.endpoint);
+  } catch (err) {
+    return superCopyError('bad_request', err.message || '接收地址无效');
+  }
+  const origin = core.originPattern(endpoint);
+  if (!origin || !(await hasOriginPermission(origin))) {
+    return superCopyError(
+      'permission',
+      '需要授权访问 ' + (origin || endpoint) + '，请重新点「测试连接」并允许权限。'
+    );
+  }
+  const token = String(msg.token || '').trim();
+  const headers = { 'X-XTR-Client': 'x-translate-plugin/' + chrome.runtime.getManifest().version };
+  if (token) headers.Authorization = 'Bearer ' + token;
+
+  const healthUrl = new URL('/health', endpoint).toString();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SUPER_COPY_TEST_TIMEOUT_MS);
+  const started = Date.now();
+  try {
+    const res = await fetch(healthUrl, {
+      method: 'GET',
+      headers,
+      credentials: 'omit',
+      redirect: 'error',
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    const text = await res.text();
+    const data = parseJsonBody(text);
+    if (!res.ok) {
+      const suffix = res.status === 404 ? '（接收端没有 /health 接口）' : '';
+      return superCopyError(
+        superCopyHttpCode(res.status),
+        superCopyMessage(data, '健康检查返回 HTTP ' + res.status + suffix),
+        { status: res.status }
+      );
+    }
+    if (data && data.ok === false) {
+      return superCopyError('bad_response', superCopyMessage(data, '接收端报告未就绪'), { status: res.status });
+    }
+    return { ok: true, status: res.status, response: data, ms: Date.now() - started };
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      return superCopyError('timeout', '健康检查超时。');
+    }
+    return superCopyError('network', '无法连接接收端：' + (err && err.message ? err.message : String(err)));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* ---------------------------------------------------------------- messages */
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -384,6 +596,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleScanLocal()
       .then(sendResponse)
       .catch((err) => sendResponse({ ok: false, error: providers.serializeError(err) }));
+    return true;
+  }
+
+  if (msg.type === 'xtr:superCopy') {
+    handleSuperCopy(msg)
+      .then(sendResponse)
+      .catch((err) => sendResponse(superCopyError('error', err && err.message ? err.message : String(err))));
+    return true;
+  }
+
+  if (msg.type === 'xtr:testSuperCopy') {
+    handleTestSuperCopy(msg)
+      .then(sendResponse)
+      .catch((err) => sendResponse(superCopyError('error', err && err.message ? err.message : String(err))));
     return true;
   }
 

@@ -31,6 +31,39 @@ test('mergeSettings fills defaults and validates values', () => {
   assert.equal(s3.minChars, 2);
 });
 
+test('super copy settings use safe defaults and normalize input', () => {
+  const defaults = shared.mergeSettings({});
+  assert.equal(defaults.superCopy.enabled, false);
+  assert.equal(defaults.superCopy.endpoint, '');
+  assert.equal(defaults.superCopy.token, '');
+  assert.equal(defaults.superCopy.includeQuoted, true);
+  assert.equal(defaults.superCopy.includeMedia, true);
+
+  const s = shared.mergeSettings({
+    superCopy: {
+      enabled: true,
+      endpoint: '  http://127.0.0.1:8787/ingest  ',
+      token: '  secret  ',
+      includeQuoted: false,
+      includeMedia: false
+    }
+  });
+  assert.equal(s.superCopy.enabled, true);
+  assert.equal(s.superCopy.endpoint, 'http://127.0.0.1:8787/ingest');
+  assert.equal(s.superCopy.token, 'secret');
+  assert.equal(s.superCopy.includeQuoted, false);
+  assert.equal(s.superCopy.includeMedia, false);
+
+  const bad = shared.mergeSettings({ superCopy: { enabled: 'yes', includeQuoted: 'no' } });
+  assert.equal(bad.superCopy.enabled, false);
+  assert.equal(bad.superCopy.includeQuoted, true);
+
+  assert.equal(core.normalizeEndpoint('127.0.0.1:8787/ingest'), 'http://127.0.0.1:8787/ingest');
+  assert.equal(core.normalizeEndpoint('agent.example.com/ingest'), 'https://agent.example.com/ingest');
+  assert.equal(core.normalizeEndpoint('https://agent.example.com/ingest#x'), 'https://agent.example.com/ingest');
+  assert.throws(() => core.normalizeEndpoint('ftp://example.com/ingest'));
+});
+
 test('Magpie preset points at the local gateway', () => {
   assert.equal(shared.LLM_PRESETS.magpie.baseUrl, 'http://127.0.0.1:3425/v1');
   assert.equal(shared.LLM_PRESETS.magpie.apiKey, 'magpie');
