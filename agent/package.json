@@ -1,0 +1,15 @@
+{
+  "name": "x-knowledge-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local knowledge-base agent for x-translate-plugin super copy",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "cli": "node cli.js",
+    "test": "node --test test/*.test.js"
+  }
+}

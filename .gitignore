@@ -15,3 +15,8 @@ test/.tmp/
 *.p12
 *.pfx
 *.crx
+
+# Local agent runtime data
+agent/data/
+agent/config.json
+agent/config.local.json

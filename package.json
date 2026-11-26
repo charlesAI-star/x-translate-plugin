@@ -1,6 +1,6 @@
 {
   "name": "x-translate-plugin",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Chrome extension that translates X/Twitter posts and sends posts/articles to a local or remote knowledge-base agent.",
   "license": "MIT",
@@ -9,7 +9,10 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "test:e2e": "node test/e2e.js"
+    "test:e2e": "node test/e2e.js",
+    "agent": "node agent/server.js",
+    "agent:cli": "node agent/cli.js",
+    "agent:test": "node --test agent/test/*.test.js"
   },
   "devDependencies": {
     "puppeteer-core": "^25.18.1"

@@ -36,6 +36,7 @@ test('super copy settings use safe defaults and normalize input', () => {
   assert.equal(defaults.superCopy.enabled, false);
   assert.equal(defaults.superCopy.endpoint, '');
   assert.equal(defaults.superCopy.token, '');
+  assert.equal(defaults.superCopy.mode, 'full');
   assert.equal(defaults.superCopy.includeQuoted, true);
   assert.equal(defaults.superCopy.includeMedia, true);
 
@@ -44,6 +45,7 @@ test('super copy settings use safe defaults and normalize input', () => {
       enabled: true,
       endpoint: '  http://127.0.0.1:8787/ingest  ',
       token: '  secret  ',
+      mode: 'classify',
       includeQuoted: false,
       includeMedia: false
     }
@@ -51,11 +53,13 @@ test('super copy settings use safe defaults and normalize input', () => {
   assert.equal(s.superCopy.enabled, true);
   assert.equal(s.superCopy.endpoint, 'http://127.0.0.1:8787/ingest');
   assert.equal(s.superCopy.token, 'secret');
+  assert.equal(s.superCopy.mode, 'classify');
   assert.equal(s.superCopy.includeQuoted, false);
   assert.equal(s.superCopy.includeMedia, false);
 
-  const bad = shared.mergeSettings({ superCopy: { enabled: 'yes', includeQuoted: 'no' } });
+  const bad = shared.mergeSettings({ superCopy: { enabled: 'yes', mode: 'everything', includeQuoted: 'no' } });
   assert.equal(bad.superCopy.enabled, false);
+  assert.equal(bad.superCopy.mode, 'full');
   assert.equal(bad.superCopy.includeQuoted, true);
 
   assert.equal(core.normalizeEndpoint('127.0.0.1:8787/ingest'), 'http://127.0.0.1:8787/ingest');

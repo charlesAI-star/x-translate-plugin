@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>X 知识库</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23211d17'/%3E%3Ctext x='32' y='44' font-family='-apple-system,sans-serif' font-size='36' font-weight='700' fill='%23fffdf8' text-anchor='middle'%3EX%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">X</div>
+          <div class="brand-text">
+            <h1>X 知识库</h1>
+            <p>本地整理 · 每周分析</p>
+          </div>
+        </div>
+
+        <button id="btn-run-weekly" class="btn btn-primary btn-block">开始每周整理</button>
+
+        <nav class="nav" id="main-nav">
+          <button class="nav-item active" data-view="entries" data-status="">
+            <span>全部内容</span><span class="nav-count" id="count-all">0</span>
+          </button>
+          <button class="nav-item" data-view="entries" data-status="pending,processing">
+            <span>待整理</span><span class="nav-count" id="count-pending">0</span>
+          </button>
+          <button class="nav-item" data-view="entries" data-status="saved">
+            <span>仅保存</span><span class="nav-count" id="count-saved">0</span>
+          </button>
+          <button class="nav-item" data-view="entries" data-status="classified">
+            <span>待分析</span><span class="nav-count" id="count-classified">0</span>
+          </button>
+          <button class="nav-item" data-view="entries" data-status="ready">
+            <span>已分析</span><span class="nav-count" id="count-ready">0</span>
+          </button>
+          <button class="nav-item" data-view="entries" data-status="failed">
+            <span>失败</span><span class="nav-count" id="count-failed">0</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-section">
+          <div class="section-head">
+            <span>分类</span>
+            <button id="btn-add-category" class="icon-btn" title="新建分类" aria-label="新建分类">+</button>
+          </div>
+          <div id="category-tree" class="category-tree">
+            <div class="muted small">加载中…</div>
+          </div>
+        </div>
+
+        <div class="sidebar-section sidebar-links">
+          <button class="nav-item" data-view="weekly">
+            <span>每周报告</span><span class="nav-count warn hidden" id="count-proposals">0</span>
+          </button>
+          <button class="nav-item" data-view="summaries"><span>分类总结</span></button>
+          <button class="nav-item" data-view="categories"><span>分类管理</span></button>
+          <button class="nav-item" data-view="entries" data-deleted="1">
+            <span>回收站</span><span class="nav-count" id="count-deleted">0</span>
+          </button>
+        </div>
+
+        <footer class="sidebar-foot">
+          <span id="llm-status" class="llm-status"><i class="dot"></i>检查中…</span>
+          <button id="btn-settings" class="link-btn">设置</button>
+        </footer>
+      </aside>
+
+      <main class="main">
+        <header class="topbar" id="topbar">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 1 1 4.55 13.46l4.24 4.25-1.42 1.41-4.24-4.24A7.5 7.5 0 0 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z"/></svg>
+            <input id="search" type="search" placeholder="搜索标题、摘要、正文、标签或作者" autocomplete="off" />
+          </div>
+          <div class="topbar-actions">
+            <select id="sort-select" class="select" aria-label="排序">
+              <option value="newest">最新发布</option>
+              <option value="updated">最近更新</option>
+              <option value="oldest">最早发布</option>
+            </select>
+            <button id="btn-refresh" class="btn" title="刷新">刷新</button>
+          </div>
+        </header>
+
+        <section id="content" class="content" aria-live="polite"></section>
+      </main>
+    </div>
+
+    <dialog id="entry-dialog" class="dialog drawer">
+      <div class="drawer-inner">
+        <header class="dialog-head">
+          <div class="dialog-head-main">
+            <div id="entry-badges" class="badge-row"></div>
+            <h2 id="entry-title">内容详情</h2>
+            <div id="entry-meta" class="meta-line"></div>
+          </div>
+          <button class="icon-btn" data-close aria-label="关闭">×</button>
+        </header>
+        <div id="entry-body" class="dialog-body"></div>
+      </div>
+    </dialog>
+
+    <dialog id="weekly-dialog" class="dialog wide">
+      <header class="dialog-head">
+        <div class="dialog-head-main">
+          <div id="weekly-badges" class="badge-row"></div>
+          <h2 id="weekly-title">周报</h2>
+          <div id="weekly-meta" class="meta-line"></div>
+        </div>
+        <button class="icon-btn" data-close aria-label="关闭">×</button>
+      </header>
+      <div id="weekly-body" class="dialog-body"></div>
+    </dialog>
+
+    <dialog id="settings-dialog" class="dialog">
+      <form id="settings-form" method="dialog">
+        <header class="dialog-head">
+          <div class="dialog-head-main">
+            <h2>设置</h2>
+            <div class="meta-line">Token 只保存在本机浏览器中。</div>
+          </div>
+          <button type="button" class="icon-btn" data-close aria-label="关闭">×</button>
+        </header>
+        <div class="dialog-body form-stack">
+          <label class="field">
+            <span>访问 Token</span>
+            <input id="settings-token" type="password" placeholder="运行配置或 KB_TOKEN 中的 token，留空表示未启用" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>插件接收地址</span>
+            <div class="copy-row">
+              <input id="settings-endpoint" type="text" readonly />
+              <button type="button" id="btn-copy-endpoint" class="btn">复制</button>
+            </div>
+          </label>
+          <div class="field">
+            <span>服务状态</span>
+            <div id="settings-status" class="muted small">未检查</div>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" id="btn-test" class="btn">测试连接</button>
+            <button type="submit" class="btn btn-primary">保存</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="category-dialog" class="dialog">
+      <form id="category-form">
+        <header class="dialog-head">
+          <div class="dialog-head-main">
+            <h2 id="category-dialog-title">新建分类</h2>
+            <div class="meta-line" id="category-dialog-hint">一级分类固定，二级分类可自由调整。</div>
+          </div>
+          <button type="button" class="icon-btn" data-close aria-label="关闭">×</button>
+        </header>
+        <div class="dialog-body form-stack">
+          <input id="category-key" type="hidden" />
+          <label class="field" id="category-level-field">
+            <span>层级</span>
+            <select id="category-level">
+              <option value="2">二级分类</option>
+              <option value="1">一级分类</option>
+            </select>
+          </label>
+          <label class="field" id="category-parent-field">
+            <span>所属一级分类</span>
+            <select id="category-parent"></select>
+          </label>
+          <label class="field">
+            <span>名称</span>
+            <input id="category-name" type="text" maxlength="40" required placeholder="例如：模型与推理" />
+          </label>
+          <label class="field">
+            <span>说明</span>
+            <textarea id="category-desc" rows="3" maxlength="300" placeholder="这个分类收纳什么内容"></textarea>
+          </label>
+          <div class="dialog-actions">
+            <button type="button" class="btn" data-close>取消</button>
+            <button type="submit" class="btn btn-primary">保存</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="archive-dialog" class="dialog">
+      <form id="archive-form">
+        <header class="dialog-head">
+          <div class="dialog-head-main">
+            <h2>归档分类</h2>
+            <div class="meta-line">归档不会删除内容，条目会迁移到目标分类。</div>
+          </div>
+          <button type="button" class="icon-btn" data-close aria-label="关闭">×</button>
+        </header>
+        <div class="dialog-body form-stack">
+          <input id="archive-key" type="hidden" />
+          <p id="archive-desc" class="muted"></p>
+          <label class="field" id="archive-target-field">
+            <span>迁移到</span>
+            <select id="archive-target"></select>
+          </label>
+          <div class="dialog-actions">
+            <button type="button" class="btn" data-close>取消</button>
+            <button type="submit" class="btn btn-danger">归档</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="auth-dialog" class="dialog">
+      <form id="auth-form">
+        <header class="dialog-head">
+          <div class="dialog-head-main">
+            <h2>需要 Token</h2>
+            <div class="meta-line">服务端启用了访问 Token，请输入后继续。</div>
+          </div>
+        </header>
+        <div class="dialog-body form-stack">
+          <label class="field">
+            <span>Token</span>
+            <input id="auth-token" type="password" autocomplete="off" required />
+          </label>
+          <div class="dialog-actions">
+            <button type="submit" class="btn btn-primary">继续</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
