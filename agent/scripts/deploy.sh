@@ -149,7 +149,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
   else
     cp "$SOURCE_DIR/config.example.json" "$CONFIG_FILE"
     chmod 600 "$CONFIG_FILE"
-    echo "已创建配置: $CONFIG_FILE（请按需填写 token；不要提交）"
+    echo "已创建配置: ${CONFIG_FILE}（请按需填写 token；不要提交）"
   fi
 else
   echo "保留现有配置: $CONFIG_FILE"
